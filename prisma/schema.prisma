@@ -1,0 +1,252 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum usuarios_Capitado {
+  SI
+  NO
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model agenda {
+  idagenda                 Int       @id @default(autoincrement())
+  IdModalidad              Int       @default(0)
+  fecha_solicitud          DateTime? @db.Date
+  fecha_cita               DateTime  @db.Date
+  idhora                   String    @db.VarChar(5)
+  idmedico                 String    @db.VarChar(12)
+  idusuario                String?   @default("0000") @db.VarChar(18)
+  Telefono                 String?   @default("0000") @db.VarChar(18)
+  Cumplida                 Int?
+  NoAdmision               Int?
+  TipoCita                 String?   @db.VarChar(50)
+  AsignadaPor              String?   @db.VarChar(50)
+  CanceldaPor              String?   @db.VarChar(50)
+  Fecha_cancelacion        DateTime? @db.DateTime(0)
+  TipoContrato             String?   @db.VarChar(50)
+  Entidad                  String?   @db.VarChar(50)
+  MedioSolicitud           String?   @db.VarChar(50)
+  Finalidad                String?   @db.VarChar(2)
+  Estado                   String?   @default("Sin asignar") @db.VarChar(50)
+  TipoAgenda               String?   @default("Agendada") @db.VarChar(50)
+  Activada_por             String?   @map("Activada por") @db.VarChar(50)
+  Fecha_Activacion         DateTime? @db.Date
+  Gestionada               Int?      @default(0)
+  Hora_Activacion          DateTime? @db.Time(0)
+  LlegoTarde               String?   @db.VarChar(2)
+  notificacionrecordatorio String?   @default("No enviado") @db.VarChar(52)
+  notificacioncancelacion  String?   @default("No enviado") @db.VarChar(52)
+  notificacion_encuesta    String?   @default("No enviado") @db.VarChar(45)
+  Programa                 String?   @db.VarChar(100)
+  clase_cita               String?   @db.VarChar(100)
+  IdCentro                 Int?
+  IdSede                   Int?
+  Bloqueada_Por            String?   @db.VarChar(50)
+  fecha_bloqueo            DateTime? @db.Date
+  cancelada_por            String?   @db.VarChar(50)
+  paciente_cancelada       String?   @db.VarChar(50)
+  fecha_cancelada          DateTime? @db.Date
+
+  @@unique([fecha_cita, idhora, idmedico, IdSede], map: "fecha_cita_idhora_idmedico")
+}
+
+model usuarios {
+  Carnet                       String             @default("0") @db.VarChar(255)
+  codPrestador                 String?            @db.VarChar(12)
+  Identificaci_n_usuario       String             @map("Identificación_usuario") @db.VarChar(20)
+  Tipo_identificaci_n          String             @map("Tipo_identificación") @db.VarChar(2)
+  Primer_apellido              String             @db.VarChar(30)
+  Segundo_apellido             String?            @db.VarChar(30)
+  Primer_nombre                String             @db.VarChar(20)
+  Segundo_nombre               String?            @db.VarChar(20)
+  Direcci_n                    String?            @map("Dirección") @db.VarChar(250)
+  Tel_fono                     String?            @map("Teléfono") @db.VarChar(10)
+  Tipo_usuario                 String             @db.VarChar(2)
+  Tipo_afiliado                String?            @db.VarChar(1)
+  C_digo_Ocupaci_n             String?            @default("999") @map("Código_Ocupación") @db.VarChar(4)
+  Unidad_edad                  String             @default("1") @db.VarChar(1)
+  Edad                         String             @default("0") @db.VarChar(30)
+  Sexo                         String             @db.VarChar(1)
+  Residencia                   String             @default("COL") @db.VarChar(5)
+  Zona_residencia              String             @default("U") @db.VarChar(1)
+  cedula_afiliado              String?            @db.VarChar(15)
+  Fecha_nacimient              DateTime?          @db.Date
+  NHistoria                    String?            @db.VarChar(20)
+  Estado_civil                 String?            @default("1") @db.VarChar(20)
+  Estado                       String?            @default("ACTIVO") @db.VarChar(10)
+  fecha_retiro                 DateTime?          @db.Date
+  Ciudad                       String?            @db.VarChar(20)
+  Sector                       String             @default("SIN ESPECIFICAR") @db.VarChar(20)
+  Nombre_acudiente             String?            @db.VarChar(30)
+  Telefono_acudiente           String?            @db.VarChar(12)
+  Antecedente_Patologico1      String?            @db.VarChar(4)
+  Antecedente_Patologico2      String?            @db.VarChar(4)
+  Antecedente_Patologico3      String?            @db.VarChar(4)
+  Antecedente_Quirurgico1      String?            @db.VarChar(6)
+  Antecedente_Quirurgico2      String?            @db.VarChar(6)
+  Antecedente_Familiar1        String?            @db.VarChar(4)
+  Antecedente_Familiar2        String?            @db.VarChar(4)
+  Antecedente_Familiar3        String?            @db.VarChar(4)
+  Hemoclasificaci_n            String?            @map("Hemoclasificación") @db.VarChar(2)
+  RH                           String?            @db.VarChar(10)
+  Fecha_afiliacion             DateTime?          @db.Date
+  Parentezco                   String?            @db.VarChar(1)
+  Ciudad_cedula                String?            @db.VarChar(50)
+  Escalafon_afiliado           String?            @db.VarChar(2)
+  Discapacidad                 String?            @db.VarChar(1)
+  Estrato                      String?            @db.VarChar(1)
+  AL1                          Int?               @default(0)
+  AL2                          Int?               @default(0)
+  Cod_medico                   String?            @db.VarChar(12)
+  Codigo_eps                   String             @default("REUE09") @db.VarChar(30)
+  Rango                        String?            @db.VarChar(15)
+  Pagos                        String?            @db.VarChar(20)
+  Cod_odontologo               String?            @db.VarChar(12)
+  Fecha_novedad                DateTime?          @db.Date
+  Contrato                     String?            @db.VarChar(20)
+  N_mero_afiliaci_n            String?            @map("Número_afiliación") @db.VarChar(50)
+  Etnico                       String?            @db.VarChar(1)
+  NumeroSemanasCotizadas       Int?               @default(0)
+  LugarNacimiento              String?            @db.VarChar(5)
+  NroHijos                     Int?               @default(0)
+  Escolaridad                  String?            @db.VarChar(2)
+  FechaAfiliacion              DateTime?          @default(now()) @db.DateTime(0)
+  Celular                      String?            @db.VarChar(30)
+  CorreoElectr_nico            String?            @map("CorreoElectrónico") @db.VarChar(100)
+  Responsable                  String?            @db.VarChar(50)
+  Telefono_Responsable         String?            @db.VarChar(50)
+  Religion                     String?            @db.VarChar(50)
+  Telefono_Secundario          String?            @map("Telefono Secundario") @db.VarChar(10)
+  email                        String?            @db.VarChar(255)
+  Fecha_Creado                 String?            @map("Fecha Creado") @db.VarChar(255)
+  Creado_Por                   String?            @map("Creado Por") @db.VarChar(255)
+  Fecha_Modificado             String?            @map("Fecha Modificado") @db.VarChar(255)
+  Modificado_por               String?            @map("Modificado por") @db.VarChar(255)
+  Fecha_Estado                 String?            @map("Fecha Estado") @db.VarChar(255)
+  Portabilidad                 String?            @db.VarChar(255)
+  Fecha_Portabilidad           String?            @map("Fecha Portabilidad") @db.VarChar(255)
+  nombre_disp_asignado         String?            @db.VarChar(255)
+  Genero                       String?            @db.VarChar(255)
+  Poblacion_Clave              String?            @map("Poblacion Clave") @db.VarChar(255)
+  Gestacion                    String?            @default("NO") @db.VarChar(255)
+  Victima_del_Conflicto_armado String?            @default("NO") @map("Victima del Conflicto armado") @db.VarChar(255)
+  VICTIMA_DEL_MALTRATO         String?            @default("NO") @map("VICTIMA DEL MALTRATO") @db.VarChar(255)
+  ABANDONO_SOCIAL              String?            @default("NO") @map("ABANDONO SOCIAL") @db.VarChar(255)
+  DESESCOLARIZADO              String?            @default("NO") @db.VarChar(255)
+  DESEMPLEADO                  String?            @default("NO") @db.VarChar(255)
+  CARCELARIO                   String?            @default("NO") @db.VarChar(255)
+  MIGRANTE                     String?            @default("NO") @db.VarChar(255)
+  TRABAJADORA_SEXUAL           String?            @default("NO") @map("TRABAJADORA SEXUAL") @db.VarChar(255)
+  POBLACION_LGTBI              String?            @default("NO") @map("POBLACION LGTBI") @db.VarChar(255)
+  ORIENTACION_SEXUAL           String?            @default("NO REFIERE") @map("ORIENTACION SEXUAL") @db.VarChar(255)
+  Barrio                       String?            @db.VarChar(50)
+  confirmacion_telefono        String?            @default("'SIN CONFIRMAR'") @db.VarChar(50)
+  poll                         String?            @default("No enviado") @db.VarChar(45)
+  Clave                        String?            @db.VarChar(50)
+  codPaisResidencia            String?            @default("057") @db.VarChar(3)
+  codMunicipioResidencia       String?            @db.VarChar(5)
+  codDepartamentoResidencia    String?            @db.VarChar(2)
+  codPaisOrigen                String?            @default("057") @db.VarChar(3)
+  codZonaTerritorialResidencia String?            @db.VarChar(2)
+  incapacidad                  String?            @db.VarChar(2)
+  Capitado                     usuarios_Capitado?
+  IdUsuario                    Int                @id @default(autoincrement())
+  IdCentro                     Int?
+  vacunas_completas            String?            @db.VarChar(50)
+  intervenciones_quirurgicas   String?            @db.VarChar(250)
+  alergia                      String?            @db.VarChar(120)
+
+  @@unique([Identificaci_n_usuario, Tipo_identificaci_n], map: "Identificación_usuario_Tipo_identificación")
+}
+
+model empleados {
+  C_digo_empleado String   @id @map("Código_empleado") @db.VarChar(12)
+  Nombre_empleado String   @db.VarChar(40)
+  Direcci_n       String?  @map("Dirección") @db.VarChar(50)
+  Tel_fonos       String?  @map("Teléfonos") @db.VarChar(30)
+  Medico          Boolean?
+  EsMedico        Boolean  @default(false)
+  Odontologo      Boolean?
+  Clave           String?  @db.VarChar(12)
+  Estado_Empleado Boolean?
+  POtraEsp        Boolean?
+  Registro_medico String?  @db.VarChar(25)
+  De              String?  @db.VarChar(30)
+  Firma           String?  @default("SIN FIRMA") @db.VarChar(255)
+  Registra        Boolean?
+  enfermeria      Boolean?
+  Perfil          Int?
+  Perfil2         Int?
+  phone           String?  @db.VarChar(50)
+  Firmaimg        Bytes    @db.Blob
+  consultorio     String?  @db.VarChar(45)
+  email           String?  @db.VarChar(50)
+  IdCentro        Int?
+  userpic         Bytes?   @db.MediumBlob
+  TipoDocumento   String?  @db.VarChar(3)
+  Documento       String?  @db.VarChar(18)
+
+  @@index([C_digo_empleado], map: "Código_empleado")
+}
+
+model especialidad_empleados {
+  Consecutivo         Int       @unique(map: "Consecutivo") @default(autoincrement())
+  C_digo_empleado     String    @map("Código_empleado") @db.VarChar(12)
+  C_digo_especialidad String    @map("Código_especialidad") @db.VarChar(3)
+  IdCentro            Int
+  Principal           Boolean?
+  Cups                String?   @db.VarChar(50)
+  regimen_atencion    String?   @db.VarChar(45)
+  MinutosXConsulta    Int?
+  NoPacientes         Int?
+  fecha_final         DateTime? @db.Date
+  fecha_inicial       DateTime? @db.Date
+  hf_m                String?   @db.VarChar(5)
+  hf_t                String?   @db.VarChar(5)
+  hi_m                String?   @db.VarChar(5)
+  hi_t                String?   @db.VarChar(5)
+  IdSede              Int?
+  bot                 String?   @db.VarChar(45)
+  contrato            String?   @db.VarChar(45)
+
+  @@id([C_digo_empleado, C_digo_especialidad, IdCentro])
+}
+
+model especialidadcupsempleado {
+  CodigoEmpleado     String @db.VarChar(12)
+  CodigoEspecialidad String @db.VarChar(3)
+  Cups               String @db.VarChar(6)
+  Porcentaje         Float?
+  Valor              Float?
+
+  @@id([CodigoEmpleado, CodigoEspecialidad, Cups])
+  @@index([CodigoEmpleado], map: "CodigoEmpleado")
+  @@index([CodigoEspecialidad], map: "CodigoEspecialidad")
+  @@index([Cups], map: "Cups")
+}
+
+model tventidades {
+  Codigo        String   @id @db.VarChar(6)
+  NombreEntidad String?  @db.VarChar(255)
+  Departamento  String?  @db.VarChar(2)
+  Municipio     String?  @db.VarChar(5)
+  Digitado      Boolean?
+  Nit           String   @db.VarChar(9)
+  Dv            String   @db.VarChar(1)
+  email         String   @db.VarChar(80)
+  telefono      String   @db.VarChar(10)
+  Direccion     String   @db.VarChar(50)
+}
+
+model tvespecialidades {
+  CodigoEspecialidad String  @id @db.VarChar(3)
+  Especialidad       String? @db.VarChar(120)
+  CUPS               String? @db.VarChar(10)
+  CodigoServicio     Int?
+}
