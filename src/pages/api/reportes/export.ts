@@ -230,7 +230,6 @@ async function sendExcel(
 
   ws.addRow([]);
   const desc =
-    `Filtros: ${parsed.desde} a ${parsed.hasta}` +
     (parsed.eps ? ` | EPS: ${parsed.eps}` : "") +
     (parsed.especialidad ? ` | Esp: ${parsed.especialidad}` : "") +
     (parsed.medico ? ` | Médico: ${parsed.medico}` : "");

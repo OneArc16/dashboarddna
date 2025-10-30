@@ -1,0 +1,14 @@
+version: "3.9"
+services:
+  web:
+    build: .
+    container_name: dashboarddna
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      # DATABASE_URL también viene del .env
+    restart: unless-stopped
