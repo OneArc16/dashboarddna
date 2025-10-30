@@ -25,10 +25,10 @@ type Row = {
 type StatKey = "ASIGNADA" | "ATENDIDA" | "CUMPLIDA" | "SIN_ASIGNAR";
 
 const STATUS_META: Record<StatKey, { label: string; dot: string }> = {
-  ASIGNADA: { label: "Asignada", dot: "bg-amber-500" },
-  ATENDIDA: { label: "Atendida", dot: "bg-emerald-500" },
-  CUMPLIDA: { label: "Cumplida", dot: "bg-indigo-500" },
-  SIN_ASIGNAR: { label: "Sin asignar", dot: "bg-zinc-400" },
+  ASIGNADA: { label: "Inasistentes", dot: "bg-amber-500" },
+  ATENDIDA: { label: "Atendidas", dot: "bg-emerald-500" },
+  CUMPLIDA: { label: "Activadas", dot: "bg-indigo-500" },
+  SIN_ASIGNAR: { label: "Cupos libres", dot: "bg-zinc-400" },
 };
 const STATUS_ORDER: StatKey[] = [
   "ASIGNADA",
@@ -195,6 +195,7 @@ export default function ReportesPage() {
       const data = (await r.json()) as { rows: Row[] };
       setRows(data.rows);
       recomputeStats(data.rows);
+      toast.success(`Se cargaron ${data.rows?.length ?? 0} registros`);
     } catch (e: any) {
       console.error("Buscar error:", e);
       toast.error(e?.message ?? "Error al buscar.");
@@ -352,7 +353,7 @@ export default function ReportesPage() {
                 checked={checkAsignada}
                 onChange={(e) => setCheckAsignada(e.target.checked)}
               />
-              Asignada
+              Asignadas
             </label>
             <label className="inline-flex items-center gap-2 text-sm">
               <input
@@ -360,7 +361,7 @@ export default function ReportesPage() {
                 checked={checkAtendida}
                 onChange={(e) => setCheckAtendida(e.target.checked)}
               />
-              Atendida
+              Atendidas
             </label>
             <label className="inline-flex items-center gap-2 text-sm">
               <input
@@ -368,7 +369,7 @@ export default function ReportesPage() {
                 checked={checkCumplida}
                 onChange={(e) => setCheckCumplida(e.target.checked)}
               />
-              Cumplida
+              Activadas
             </label>
             <label className="inline-flex items-center gap-2 text-sm">
               <input
