@@ -1,12 +1,15 @@
 // src/pages/reportes.tsx
-import { useEffect, useMemo, useState } from "react";
-import Head from "next/head";
-import toast from "react-hot-toast";
+"use client";
 
-/* ===================== Tipos ===================== */
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "react-hot-toast";
+import Head from "next/head";
+
+/* ============================ Tipos y helpers ============================ */
+
 type Option = { value: string; label: string };
 
-type ReportRow = {
+type Row = {
   cita_id: number | null;
   fecha: string;
   hora: string | null;
@@ -19,98 +22,140 @@ type ReportRow = {
   tipo_cita: string | null;
 };
 
-/* ===================== Utiles ===================== */
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const firstDayOfYearISO = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-01-01`;
+type StatKey = "ASIGNADA" | "ATENDIDA" | "CUMPLIDA" | "SIN_ASIGNAR";
+
+const STATUS_META: Record<StatKey, { label: string; dot: string }> = {
+  ASIGNADA: { label: "Asignada", dot: "bg-amber-500" },
+  ATENDIDA: { label: "Atendida", dot: "bg-emerald-500" },
+  CUMPLIDA: { label: "Cumplida", dot: "bg-indigo-500" },
+  SIN_ASIGNAR: { label: "Sin asignar", dot: "bg-zinc-400" },
+};
+const STATUS_ORDER: StatKey[] = [
+  "ASIGNADA",
+  "ATENDIDA",
+  "CUMPLIDA",
+  "SIN_ASIGNAR",
+];
+
+const normalize = (s?: string | null) =>
+  (s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
+
+const estadoKey = (s?: string | null): StatKey | null => {
+  const v = normalize(s);
+  if (v.startsWith("ASIGNAD")) return "ASIGNADA";
+  if (v.startsWith("ATENDID")) return "ATENDIDA";
+  if (v.startsWith("CUMPLID")) return "CUMPLIDA";
+  if (v.startsWith("SIN ASIGNAR")) return "SIN_ASIGNAR";
+  return null;
 };
 
-const ESTADOS = [
-  { key: "ASIGNADA", label: "Asignada" },
-  { key: "ATENDIDA", label: "Atendida" },
-  { key: "CUMPLIDA", label: "Cumplida" },
-  { key: "SIN_ASIGNAR", label: "Sin asignar" },
-] as const;
-type EstadoKey = (typeof ESTADOS)[number]["key"];
+// Debe coincidir con el tope del backend (MAX_LIMIT)
+const ALL_LIMIT = 1_000_000;
+type LimitValue = number | "ALL";
 
-/* ===================== Componente ===================== */
+/* ============================ Página ============================ */
+
 export default function ReportesPage() {
-  // filtros
-  const [desde, setDesde] = useState(firstDayOfYearISO());
-  const [hasta, setHasta] = useState(todayISO());
-
+  // Filtros
+  const [desde, setDesde] = useState<string>("");
+  const [hasta, setHasta] = useState<string>("");
   const [eps, setEps] = useState<string>("");
   const [especialidad, setEspecialidad] = useState<string>("");
   const [medico, setMedico] = useState<string>("");
-
-  const [estadoChecks, setEstadoChecks] = useState<Record<EstadoKey, boolean>>({
-    ASIGNADA: false,
-    ATENDIDA: true,
-    CUMPLIDA: false,
-    SIN_ASIGNAR: false,
-  });
-
-  type LimitValue = number | 'ALL';
-  const ALL_LIMIT = 1000000;
   const [limit, setLimit] = useState<LimitValue>(1000);
 
-  // catálogos
-  const [epsOptions, setEpsOptions] = useState<Option[]>([{ value: "", label: "Todas" }]);
-  const [espOptions, setEspOptions] = useState<Option[]>([{ value: "", label: "Todas" }]);
-  const [medicoOptions, setMedicoOptions] = useState<Option[]>([{ value: "", label: "Todos" }]);
+  const [checkAsignada, setCheckAsignada] = useState(true);
+  const [checkAtendida, setCheckAtendida] = useState(true);
+  const [checkCumplida, setCheckCumplida] = useState(true);
+  const [checkSinAsignar, setCheckSinAsignar] = useState(true);
 
-  // data
+  const estadosSeleccionados = useMemo(() => {
+    const arr: StatKey[] = [];
+    if (checkAsignada) arr.push("ASIGNADA");
+    if (checkAtendida) arr.push("ATENDIDA");
+    if (checkCumplida) arr.push("CUMPLIDA");
+    if (checkSinAsignar) arr.push("SIN_ASIGNAR");
+    return arr;
+  }, [checkAsignada, checkAtendida, checkCumplida, checkSinAsignar]);
+
+  // Catálogos
+  const [epsOpts, setEpsOpts] = useState<Option[]>([]);
+  const [espOpts, setEspOpts] = useState<Option[]>([]);
+  const [medOpts, setMedOpts] = useState<Option[]>([]);
+
+  // Resultados
+  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState<ReportRow[]>([]);
 
-  const estadosSeleccionados = useMemo(
-    () => (Object.entries(estadoChecks).filter(([, v]) => v).map(([k]) => k) as EstadoKey[]),
-    [estadoChecks]
-  );
+  // Stats
+  const [stats, setStats] = useState<Record<StatKey, number>>({
+    ASIGNADA: 0,
+    ATENDIDA: 0,
+    CUMPLIDA: 0,
+    SIN_ASIGNAR: 0,
+  });
+  const [total, setTotal] = useState(0);
 
-  /* ===================== Carga de catálogos ===================== */
+  function recomputeStats(data: Row[]) {
+    const next: Record<StatKey, number> = {
+      ASIGNADA: 0,
+      ATENDIDA: 0,
+      CUMPLIDA: 0,
+      SIN_ASIGNAR: 0,
+    };
+    for (const r of data) {
+      const k = estadoKey(r.estado);
+      if (k) next[k]++;
+    }
+    setStats(next);
+    setTotal(data.length);
+  }
+
+  useEffect(() => {
+    recomputeStats(rows);
+  }, [rows]);
+
+  /* ============================ Cargar catálogos ============================ */
+
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch("/api/catalog/eps");
-        const { options } = await r.json();
-        setEpsOptions([{ value: "", label: "Todas" }, ...(options ?? [])]);
-      } catch {
-        setEpsOptions([{ value: "", label: "Todas" }]);
+        const [rEps, rEsp] = await Promise.all([
+          fetch("/api/catalog/eps"),
+          fetch("/api/catalog/especialidades"),
+        ]);
+        const { options: epsOptions } = await rEps.json();
+        const { options: espOptions } = await rEsp.json();
+
+        setEpsOpts([{ value: "", label: "Todas" }, ...epsOptions]);
+        setEspOpts([{ value: "", label: "Todas" }, ...espOptions]);
+      } catch (e) {
+        console.error(e);
+        toast.error("No fue posible cargar catálogos.");
       }
     })();
   }, []);
 
+  // Médicos dependientes de especialidad
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch("/api/catalog/especialidades");
+        const qs = new URLSearchParams();
+        if (especialidad) qs.set("especialidad", especialidad);
+        const url =
+          "/api/catalog/medicos" + (qs.toString() ? `?${qs.toString()}` : "");
+        const r = await fetch(url);
         const { options } = await r.json();
-        setEspOptions([{ value: "", label: "Todas" }, ...(options ?? [])]);
-      } catch {
-        setEspOptions([{ value: "", label: "Todas" }]);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    // al cambiar especialidad, resetea médico y recarga lista de médicos
-    setMedico("");
-    (async () => {
-      try {
-        const q = new URLSearchParams();
-        if (especialidad) q.set("especialidad", especialidad);
-        const r = await fetch(`/api/catalog/medicos?${q.toString()}`);
-        const { options } = await r.json();
-        setMedicoOptions([{ value: "", label: "Todos" }, ...(options ?? [])]);
-      } catch {
-        setMedicoOptions([{ value: "", label: "Todos" }]);
+        setMedOpts([{ value: "", label: "Todos" }, ...(options || [])]);
+      } catch (e) {
+        console.error(e);
+        setMedOpts([{ value: "", label: "Todos" }]);
       }
     })();
   }, [especialidad]);
 
-  /* ===================== Acciones ===================== */
+  /* ============================ Acciones ============================ */
+
   const handleBuscar = async () => {
     if (!desde || !hasta) {
       toast.error("Selecciona el rango de fechas.");
@@ -123,18 +168,17 @@ export default function ReportesPage() {
 
     setLoading(true);
     try {
-      const limitToSend = limit === 'ALL' ? ALL_LIMIT : limit; // ya no hace falta Number()
+      const limitToSend = limit === "ALL" ? ALL_LIMIT : Number(limit);
 
-      
       const body = {
         desde,
         hasta,
         eps: eps || undefined,
-        estados: estadosSeleccionados.length ? estadosSeleccionados : ESTADOS.map((e) => e.key),
-        limit: limitToSend,
-        offset: 0,
         especialidad: especialidad || undefined,
         medico: medico || undefined,
+        estados: estadosSeleccionados,
+        limit: limitToSend,
+        offset: 0,
       };
 
       const r = await fetch("/api/reportes/data", {
@@ -144,95 +188,103 @@ export default function ReportesPage() {
       });
 
       if (!r.ok) {
-        const err = await r.json().catch(() => ({}));
-        throw new Error(err?.error || "Error al consultar");
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error || "No se pudo obtener el reporte.");
       }
 
-      const json = await r.json();
-      setRows(json.rows ?? []);
-      toast.success(`Se cargaron ${json.rows?.length ?? 0} registros`);
+      const data = (await r.json()) as { rows: Row[] };
+      setRows(data.rows);
+      recomputeStats(data.rows);
     } catch (e: any) {
-      console.error(e);
-      toast.error(e?.message ?? "Error al consultar");
+      console.error("Buscar error:", e);
+      toast.error(e?.message ?? "Error al buscar.");
     } finally {
       setLoading(false);
     }
   };
 
-// dentro del componente ReportesPage
-
-  const handleDescargar = () => {
+  const handleExport = () => {
+    if (!desde || !hasta) {
+      toast.error("Selecciona el rango de fechas.");
+      return;
+    }
     const q = new URLSearchParams();
     q.set("desde", desde);
     q.set("hasta", hasta);
+    estadosSeleccionados.forEach((s) => q.append("estados", s));
     if (eps) q.set("eps", eps);
     if (especialidad) q.set("especialidad", especialidad);
     if (medico) q.set("medico", medico);
-    const est = estadosSeleccionados.length ? estadosSeleccionados : ESTADOS.map((e) => e.key);
-    q.set("estados", est.join(","));
 
-    // abre la descarga (mismo tab). Si prefieres nueva pestaña: window.open(...)
-    window.location.href = `/api/reportes/export?${q.toString()}`;
+    // Dispara descarga
+    window.open(`/api/reportes/export?${q.toString()}`, "_blank");
   };
 
+  const resetFiltros = () => {
+    setEps("");
+    setEspecialidad("");
+    setMedico("");
+    setCheckAsignada(true);
+    setCheckAtendida(true);
+    setCheckCumplida(true);
+    setCheckSinAsignar(true);
+    setLimit(1000);
+  };
 
-  /* ===================== UI ===================== */
+  /* ============================ UI ============================ */
+
   return (
     <>
       <Head>
         <title>Reportes DNAPLUS</title>
       </Head>
 
-      <main className="p-4 mx-auto max-w-7xl sm:p-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className="px-4 py-6 mx-auto max-w-7xl">
+        <div className="flex items-center justify-between mb-5">
           <h1 className="text-2xl font-semibold">Reportes DNAPLUS</h1>
-
           <button
-            onClick={handleDescargar}
-            className="inline-flex items-center gap-2 px-3 py-2 text-white bg-black shadow rounded-xl hover:opacity-90 disabled:opacity-50"
-            disabled={loading}
-            title="Descargar en Excel"
+            onClick={handleExport}
+            className="inline-flex items-center gap-2 px-4 py-2 text-white bg-black rounded-xl hover:opacity-90"
+            title="Descargar Excel"
           >
-            <span>⬇️</span> Descargar
+            <span>📥</span> Descargar
           </button>
         </div>
 
-        {/* Card de filtros */}
-        <div className="bg-white border shadow-sm rounded-2xl">
-          <div className="px-4 py-3 font-medium text-gray-700 border-b">Filtros</div>
+        {/* --------- Filtros --------- */}
+        <div className="p-4 border rounded-2xl">
+          <h2 className="mb-4 font-medium">Filtros</h2>
 
-          <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 lg:grid-cols-6">
-            {/* Desde */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm text-gray-600">Desde</label>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
+            {/* Fechas */}
+            <div className="col-span-1 md:col-span-1">
+              <label className="text-sm text-slate-700">Desde</label>
               <input
                 type="date"
-                className="px-3 border rounded-md h-9"
                 value={desde}
                 onChange={(e) => setDesde(e.target.value)}
+                className="w-full px-3 py-2 mt-1 border rounded-lg"
               />
             </div>
-
-            {/* Hasta */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm text-gray-600">Hasta</label>
+            <div className="col-span-1 md:col-span-1">
+              <label className="text-sm text-slate-700">Hasta</label>
               <input
                 type="date"
-                className="px-3 border rounded-md h-9"
                 value={hasta}
                 onChange={(e) => setHasta(e.target.value)}
+                className="w-full px-3 py-2 mt-1 border rounded-lg"
               />
             </div>
 
             {/* EPS */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm text-gray-600">EPS</label>
+            <div className="col-span-1 md:col-span-1">
+              <label className="text-sm text-slate-700">EPS</label>
               <select
-                className="px-3 border rounded-md h-9"
                 value={eps}
                 onChange={(e) => setEps(e.target.value)}
+                className="w-full px-3 py-2 mt-1 border rounded-lg"
               >
-                {epsOptions.map((o) => (
+                {epsOpts.map((o) => (
                   <option key={o.value || "all"} value={o.value}>
                     {o.label}
                   </option>
@@ -241,14 +293,14 @@ export default function ReportesPage() {
             </div>
 
             {/* Especialidad */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm text-gray-600">Especialidad</label>
+            <div className="col-span-1 md:col-span-1">
+              <label className="text-sm text-slate-700">Especialidad</label>
               <select
-                className="px-3 border rounded-md h-9"
                 value={especialidad}
                 onChange={(e) => setEspecialidad(e.target.value)}
+                className="w-full px-3 py-2 mt-1 border rounded-lg"
               >
-                {espOptions.map((o) => (
+                {espOpts.map((o) => (
                   <option key={o.value || "all"} value={o.value}>
                     {o.label}
                   </option>
@@ -257,14 +309,14 @@ export default function ReportesPage() {
             </div>
 
             {/* Médico */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm text-gray-600">Médico</label>
+            <div className="col-span-1 md:col-span-1">
+              <label className="text-sm text-slate-700">Médico</label>
               <select
-                className="px-3 border rounded-md h-9"
                 value={medico}
                 onChange={(e) => setMedico(e.target.value)}
+                className="w-full px-3 py-2 mt-1 border rounded-lg"
               >
-                {medicoOptions.map((o) => (
+                {medOpts.map((o) => (
                   <option key={o.value || "all"} value={o.value}>
                     {o.label}
                   </option>
@@ -273,17 +325,16 @@ export default function ReportesPage() {
             </div>
 
             {/* Registros por página */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm text-gray-600">Registros por página</label>
+            <div className="col-span-1 md:col-span-1">
+              <label className="text-sm text-slate-700">Registros por página</label>
               <select
-                className="px-3 border rounded-md h-9"
-                value={limit === 'ALL' ? 'ALL' : String(limit)}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setLimit(v === "ALL" ? "ALL" : Number(e.target.value));
-                }}
+                value={limit === "ALL" ? "ALL" : String(limit)}
+                onChange={(e) =>
+                  setLimit(e.target.value === "ALL" ? "ALL" : Number(e.target.value))
+                }
+                className="w-full px-3 py-2 mt-1 border rounded-lg"
               >
-                {[100, 500, 1000, 5000].map(n => (
+                {[100, 500, 1000, 5000].map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>
@@ -294,85 +345,135 @@ export default function ReportesPage() {
           </div>
 
           {/* Estados */}
-          <div className="flex flex-wrap items-center gap-6 pb-4 pl-4 px -4">
-            <div className="text-sm text-gray-600">Estados</div>
-            {ESTADOS.map((e) => (
-              <label key={e.key} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4"
-                  checked={!!estadoChecks[e.key]}
-                  onChange={(ev) =>
-                    setEstadoChecks((s) => ({ ...s, [e.key]: ev.target.checked }))
-                  }
-                />
-                {e.label}
-              </label>
-            ))}
+          <div className="grid grid-cols-2 gap-2 mt-3 md:grid-cols-4">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={checkAsignada}
+                onChange={(e) => setCheckAsignada(e.target.checked)}
+              />
+              Asignada
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={checkAtendida}
+                onChange={(e) => setCheckAtendida(e.target.checked)}
+              />
+              Atendida
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={checkCumplida}
+                onChange={(e) => setCheckCumplida(e.target.checked)}
+              />
+              Cumplida
+            </label>
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={checkSinAsignar}
+                onChange={(e) => setCheckSinAsignar(e.target.checked)}
+              />
+              Sin asignar
+            </label>
+          </div>
 
-            <div className="pr-4 ml-auto">
-              <button
-                onClick={handleBuscar}
-                disabled={loading}
-                className="px-4 py-2 text-white bg-blue-600 shadow rounded-xl hover:bg-blue-700 disabled:opacity-50"
-              >
-                {loading ? "Buscando..." : "Buscar"}
-              </button>
-            </div>
+          <div className="flex items-center gap-3 mt-4">
+            <button
+              onClick={handleBuscar}
+              disabled={loading}
+              className="px-4 py-2 text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-60"
+            >
+              {loading ? "Buscando..." : "Buscar"}
+            </button>
+            <button
+              onClick={resetFiltros}
+              className="px-4 py-2 border rounded-xl text-slate-700 hover:bg-slate-50"
+            >
+              Limpiar filtros
+            </button>
           </div>
         </div>
 
-        {/* Resultados */}
-        <div className="mt-4 bg-white border shadow-sm rounded-2xl">
-          <div className="flex items-center justify-between px-4 py-3 border-b">
-            <div className="font-medium text-gray-700">Resultados ({rows.length})</div>
-            <div className="text-xs text-gray-500">
-              {rows.length > 0 && `Mostrando ${rows.length} registro(s)`}
+        {/* --------- Resultados --------- */}
+        <div className="p-4 mt-6 border rounded-2xl">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-medium">
+              Resultados ({total})
+            </h3>
+            <div className="text-sm text-slate-500">
+              Mostrando {rows.length} registro(s)
             </div>
           </div>
 
+          {/* Resumen por estado */}
+          <div className="flex flex-wrap gap-2 mt-1 mb-3 text-sm">
+            {STATUS_ORDER.map((k) => {
+              const pct = total ? ((stats[k] / total) * 100).toFixed(1) : "0.0";
+              return (
+                <div
+                  key={k}
+                  className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5"
+                >
+                  <span className={`inline-block size-2 rounded-full ${STATUS_META[k].dot}`} />
+                  <span className="font-medium">{STATUS_META[k].label}:</span>
+                  <span className="tabular-nums">{stats[k]}</span>
+                  <span className="text-zinc-500">({pct}%)</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Tabla */}
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
-              <thead className="sticky top-0 text-xs text-left text-gray-500 uppercase bg-gray-50">
-                <tr>
-                  <th className="px-3 py-2"># Cita</th>
-                  <th className="px-3 py-2">Fecha</th>
-                  <th className="px-3 py-2">Hora</th>
-                  <th className="px-3 py-2">Paciente</th>
-                  <th className="px-3 py-2">EPS</th>
-                  <th className="px-3 py-2">ID Médico</th>
-                  <th className="px-3 py-2">Médico</th>
-                  <th className="px-3 py-2">Estado</th>
-                  <th className="px-3 py-2">Tipo Cita</th>
+              <thead>
+                <tr className="text-left border-b bg-slate-50">
+                  {[
+                    "ID Cita",
+                    "Fecha",
+                    "Hora",
+                    "Paciente",
+                    "EPS",
+                    "ID Médico",
+                    "Médico",
+                    "Estado",
+                    "Tipo Cita (CUPS)",
+                  ].map((h) => (
+                    <th key={h} className="px-3 py-2 font-semibold">
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 ? (
+                {rows.length === 0 && (
                   <tr>
-                    <td className="px-3 py-6 text-center text-gray-500" colSpan={9}>
+                    <td className="px-3 py-6 text-center text-slate-500" colSpan={9}>
                       Sin resultados
                     </td>
                   </tr>
-                ) : (
-                  rows.map((r, idx) => (
-                    <tr key={`${r.cita_id ?? idx}`} className="odd:bg-white even:bg-gray-50">
-                      <td className="px-3 py-2">{r.cita_id ?? "-"}</td>
-                      <td className="px-3 py-2">{r.fecha ?? "-"}</td>
-                      <td className="px-3 py-2">{r.hora ?? "-"}</td>
-                      <td className="px-3 py-2">{r.paciente ?? "-"}</td>
-                      <td className="px-3 py-2">{r.eps ?? "-"}</td>
-                      <td className="px-3 py-2">{r.idmedico ?? "-"}</td>
-                      <td className="px-3 py-2">{r.medico ?? "-"}</td>
-                      <td className="px-3 py-2">{r.estado ?? "-"}</td>
-                      <td className="px-3 py-2">{r.tipo_cita ?? "-"}</td>
-                    </tr>
-                  ))
                 )}
+                {rows.map((r, i) => (
+                  <tr key={`${r.cita_id ?? i}-${i}`} className="border-b">
+                    <td className="px-3 py-2 tabular-nums">{r.cita_id ?? ""}</td>
+                    <td className="px-3 py-2">{r.fecha}</td>
+                    <td className="px-3 py-2">{r.hora ?? ""}</td>
+                    <td className="px-3 py-2">{r.paciente ?? ""}</td>
+                    <td className="px-3 py-2">{r.eps ?? ""}</td>
+                    <td className="px-3 py-2">{r.idmedico ?? ""}</td>
+                    <td className="px-3 py-2">{r.medico ?? ""}</td>
+                    <td className="px-3 py-2">{r.estado ?? ""}</td>
+                    <td className="px-3 py-2">{r.tipo_cita ?? ""}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </div>
-      </main>
+      </div>
     </>
   );
 }
