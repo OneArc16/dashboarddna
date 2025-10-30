@@ -3,6 +3,9 @@ import { z } from "zod";
 export const EstadosEnum = z.enum(["ASIGNADA", "ATENDIDA", "CUMPLIDA", "SIN_ASIGNAR"]);
 export type EstadoKey = z.infer<typeof EstadosEnum>;
 
+// tope oficial para consultas/export
+export const MAX_LIMIT = 1_000_000;
+
 export const FiltrosSchema = z.object({
   desde: z.string().min(10), // YYYY-MM-DD
   hasta: z.string().min(10), // YYYY-MM-DD
