@@ -33,7 +33,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const options = medicos.map((m) => ({
       value: m.C_digo_empleado,
-      label: `${m.Nombre_empleado} (${m.C_digo_empleado})`,
+      label: `${m.Nombre_empleado}`,
     }));
 
     res.status(200).json({ options });
