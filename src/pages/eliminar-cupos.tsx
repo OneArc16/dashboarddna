@@ -44,6 +44,18 @@ const estadoKey = (s?: string | null): StatKey | null => {
   return null;
 };
 
+const dedupeOptions = (opts: Option[] = []): Option[] => {
+  const seen = new Set<string>();
+  const out: Option[] = [];
+  for (const o of opts) {
+    if (!o?.value) continue;
+    if (seen.has(o.value)) continue;
+    seen.add(o.value);
+    out.push(o);
+  }
+  return out;
+};
+
 /* ============================ Componente: MultiSelectDropdown ============================ */
 
 function MultiSelectDropdown({
@@ -84,7 +96,7 @@ function MultiSelectDropdown({
 
   useEffect(() => {
     if (allRef.current) {
-      allRef.current.indeterminate = someChecked;
+      (allRef.current as any).indeterminate = someChecked;
     }
   }, [someChecked]);
 
@@ -292,40 +304,128 @@ export default function EliminarCuposPage() {
     })();
   }, []);
 
-  // Médicos dependientes de especialidad (múltiples)
+  // ====== FILTRO DE MÉDICOS SEGÚN ESPECIALIDADES (ROBUSTO) ======
+  // Intenta múltiples formatos:
+  // 1) POST con JSON { especialidades: [...] }
+  // 2) GET con especialidad[] / especialidades[]
+  // 3) GET con repetidos ?especialidad=016&especialidad=022 (y plural)
+  // 4) GET con CSV ?especialidad=016,022 (y plural)
+  // Nunca cae a "todos" si hay especialidades seleccionadas.
+  const reqIdRef = useRef(0);
+
   useEffect(() => {
     (async () => {
+      const myReqId = ++reqIdRef.current;
       try {
+        // Limpiar médicos seleccionados y opciones al cambiar especialidades
         setMedicosSel([]);
+        setMedOpts([]);
 
-        // Si no hay especialidades: traer todos los médicos (comportamiento útil para "sin filtro")
+        // Sin especialidades => traer todos los médicos
         if (especialidadesSel.length === 0) {
           const rAll = await fetch("/api/catalog/medicos");
-          const { options: all } = await rAll.json().catch(() => ({ options: [] }));
-          setMedOpts(all || []);
+          const jAll = await rAll.json().catch(() => ({ options: [] as Option[] }));
+          if (reqIdRef.current !== myReqId) return;
+          setMedOpts(dedupeOptions(jAll.options || []));
           return;
         }
 
-        // 1) Preferir parámetros repetidos: ?especialidad=016&especialidad=022
-        const qs1 = new URLSearchParams();
-        especialidadesSel.forEach((e) => qs1.append("especialidad", e));
-        let r = await fetch(`/api/catalog/medicos?${qs1.toString()}`);
-        let j = await r.json().catch(() => ({ options: [] as Option[] }));
-        let opts = j?.options ?? [];
+        const csv = especialidadesSel.join(",");
 
-        // 2) Fallback CSV: ?especialidad=016,022 (por compatibilidad con backend)
-        if (!opts.length) {
-          const csv = especialidadesSel.join(",");
-          const qs2 = new URLSearchParams({ especialidad: csv });
-          r = await fetch(`/api/catalog/medicos?${qs2.toString()}`);
-          j = await r.json().catch(() => ({ options: [] as Option[] }));
-          opts = j?.options ?? [];
+        const attempts: Array<() => Promise<Option[]>> = [
+          // 1) POST con JSON
+          async () => {
+            const r = await fetch("/api/catalog/medicos", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ especialidades: especialidadesSel }),
+            });
+            if (!r.ok) throw new Error("POST no aceptado");
+            const j = await r.json();
+            return (j?.options ?? []) as Option[];
+          },
+          // 2) GET con especialidad[] / especialidades[]
+          async () => {
+            const qs = new URLSearchParams();
+            especialidadesSel.forEach((e) => qs.append("especialidad[]", e));
+            const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
+            if (!r.ok) throw new Error("GET [] especialidad no aceptado");
+            const j = await r.json();
+            return (j?.options ?? []) as Option[];
+          },
+          async () => {
+            const qs = new URLSearchParams();
+            especialidadesSel.forEach((e) => qs.append("especialidades[]", e));
+            const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
+            if (!r.ok) throw new Error("GET [] especialidades no aceptado");
+            const j = await r.json();
+            return (j?.options ?? []) as Option[];
+          },
+          // 3) GET repetidos singular/plural
+          async () => {
+            const qs = new URLSearchParams();
+            especialidadesSel.forEach((e) => qs.append("especialidad", e));
+            const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
+            if (!r.ok) throw new Error("GET repetido especialidad no aceptado");
+            const j = await r.json();
+            return (j?.options ?? []) as Option[];
+          },
+          async () => {
+            const qs = new URLSearchParams();
+            especialidadesSel.forEach((e) => qs.append("especialidades", e));
+            const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
+            if (!r.ok) throw new Error("GET repetido especialidades no aceptado");
+            const j = await r.json();
+            return (j?.options ?? []) as Option[];
+          },
+          // 4) GET CSV singular/plural
+          async () => {
+            const r = await fetch(`/api/catalog/medicos?especialidad=${encodeURIComponent(csv)}`);
+            if (!r.ok) throw new Error("GET CSV especialidad no aceptado");
+            const j = await r.json();
+            return (j?.options ?? []) as Option[];
+          },
+          async () => {
+            const r = await fetch(`/api/catalog/medicos?especialidades=${encodeURIComponent(csv)}`);
+            if (!r.ok) throw new Error("GET CSV especialidades no aceptado");
+            const j = await r.json();
+            return (j?.options ?? []) as Option[];
+          },
+        ];
+
+        let found: Option[] = [];
+        for (const attempt of attempts) {
+          try {
+            const opts = dedupeOptions(await attempt());
+            if (opts.length) {
+              found = opts;
+              break;
+            }
+          } catch {
+            // probar siguiente formato
+          }
         }
 
-        setMedOpts(opts || []);
+        if (reqIdRef.current !== myReqId) return;
+
+        if (found.length === 0) {
+          setMedOpts([]);
+          toast("No hay médicos para las especialidades seleccionadas.", { icon: "ℹ️" });
+          return;
+        }
+
+        setMedOpts(found);
+
+        // Purgar selección de médicos que ya no están en las opciones
+        setMedicosSel((prev) => {
+          const valid = new Set(found.map((o) => o.value));
+          return prev.filter((id) => valid.has(id));
+        });
       } catch (e) {
+        if (reqIdRef.current !== myReqId) return;
         console.error(e);
         setMedOpts([]);
+        toast.error("No fue posible cargar médicos filtrados.");
       }
     })();
   }, [especialidadesSel]);
@@ -349,32 +449,68 @@ export default function EliminarCuposPage() {
     setLoading(true);
     setSelectedIds([]);
 
-    try {
-      const body = {
-        desde, hasta,
-        horaDesde: horaDesde || undefined,
-        horaHasta: horaHasta || undefined,
-        eps: eps || undefined,
-        // Enviamos como CSV (el API ya lo venía usando así en /list)
-        especialidad: especialidadesSel.length ? especialidadesSel.join(",") : undefined,
+    const espCsv = especialidadesSel.join(",");
+    const medCsv = medicosSel.join(",");
+
+    // Construimos 3 variantes de payload para maximizar compatibilidad
+    const base = {
+      desde,
+      hasta,
+      horaDesde: horaDesde || undefined,
+      horaHasta: horaHasta || undefined,
+      eps: eps || undefined,
+    };
+
+    const payloads: any[] = [
+      {
+        ...base,
+        especialidad: espCsv || undefined,
         medicos: medicosSel.length ? medicosSel : undefined,
-      };
+        especialidades: especialidadesSel.length ? especialidadesSel : undefined,
+        especialidadesCsv: espCsv || undefined,
+      },
+      {
+        ...base,
+        especialidad: especialidadesSel.length ? especialidadesSel : undefined,
+        medicos: medicosSel.length ? medicosSel : undefined,
+        especialidadesCsv: espCsv || undefined,
+      },
+      {
+        ...base,
+        especialidad: espCsv || undefined,
+        medicos: medCsv || undefined,
+        especialidades: especialidadesSel.length ? especialidadesSel : undefined,
+        medicosCsv: medCsv || undefined,
+      },
+    ];
 
-      const r = await fetch("/api/cupos/list", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+    try {
+      let finalRows: Row[] = [];
+      for (let i = 0; i < payloads.length; i++) {
+        const r = await fetch("/api/cupos/list", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payloads[i]),
+        });
 
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j?.error || "No se pudo obtener la lista de cupos.");
+        if (!r.ok) {
+          if (i === payloads.length - 1) {
+            const j = await r.json().catch(() => ({}));
+            throw new Error(j?.error || "No se pudo obtener la lista de cupos.");
+          }
+          continue;
+        }
+
+        const data = (await r.json()) as { rows: Row[] };
+        finalRows = data?.rows || [];
+
+        if (finalRows.length > 0 || i === payloads.length - 1) {
+          setRows(finalRows);
+          recomputeStats(finalRows);
+          toast.success(`Se cargaron ${finalRows.length} registro(s)`);
+          break;
+        }
       }
-
-      const data = (await r.json()) as { rows: Row[] };
-      setRows(data.rows || []);
-      recomputeStats(data.rows || []);
-      toast.success(`Se cargaron ${data.rows?.length ?? 0} registros`);
     } catch (e: any) {
       console.error("Buscar error:", e);
       toast.error(e?.message ?? "Error al buscar.");
@@ -542,29 +678,6 @@ export default function EliminarCuposPage() {
 
             {/* Fila 2: Especialidad y Médicos lado a lado */}
             <div className="col-span-12 md:col-span-6">
-              <label className="text-sm text-slate-700">Médicos</label>
-              <MultiSelectDropdown
-                options={medOpts}
-                value={medicosSel}
-                onChange={setMedicosSel}
-                placeholder="Selecciona médicos..."
-                labelSearch="Buscar médico..."
-                className="w-full"
-              />
-              <div className="flex items-center gap-2 mt-2 text-sm">
-                <button
-                  onClick={() => setMedicosSel([])}
-                  className="px-3 py-1.5 border rounded-lg"
-                  disabled={medicosSel.length === 0}
-                  title="Limpiar selección"
-                >
-                  Limpiar selección ({medicosSel.length})
-                </button>
-                <span className="text-slate-500">{medicosSel.length} seleccionado(s)</span>
-              </div>
-            </div>
-
-            <div className="col-span-12 md:col-span-6">
               <label className="text-sm text-slate-700">Especialidad</label>
               <MultiSelectDropdown
                 options={espOpts.filter((o) => o.value !== "")}
@@ -587,6 +700,35 @@ export default function EliminarCuposPage() {
                   {especialidadesSel.length} seleccionada(s)
                 </span>
               </div>
+            </div>
+
+            <div className="col-span-12 md:col-span-6">
+              <label className="text-sm text-slate-700">Médicos</label>
+              <MultiSelectDropdown
+                options={medOpts}
+                value={medicosSel}
+                onChange={setMedicosSel}
+                placeholder="Selecciona médicos..."
+                labelSearch="Buscar médico..."
+                className="w-full"
+              />
+              <div className="flex items-center gap-2 mt-2 text-sm">
+                <button
+                  onClick={() => setMedicosSel([])}
+                  className="px-3 py-1.5 border rounded-lg"
+                  disabled={medicosSel.length === 0}
+                  title="Limpiar selección"
+                >
+                  Limpiar selección ({medicosSel.length})
+                </button>
+                <span className="text-slate-500">{medicosSel.length} seleccionado(s)</span>
+              </div>
+              {/* Mensaje auxiliar para validar que está filtrando */}
+              {especialidadesSel.length > 0 && (
+                <div className="mt-1 text-xs text-slate-500">
+                  Mostrando {medOpts.length} médico(s) para {especialidadesSel.length} especialidad(es).
+                </div>
+              )}
             </div>
           </div>
 

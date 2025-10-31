@@ -17,12 +17,14 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-hot-toast": "^2.6.0",
+    "react-select": "^5.10.2",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/react-select": "^5.0.0",
     "autoprefixer": "^10.4.21",
     "dotenv-cli": "^10.0.0",
     "eslint": "^9",
