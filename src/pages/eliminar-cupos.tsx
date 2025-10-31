@@ -130,7 +130,7 @@ function MultiSelectDropdown({
       <button
         type="button"
         onClick={() => setOpen((s) => !s)}
-        className="flex items-center justify-between w-full px-3 py-2 mt-1 text-left bg-white border rounded-lg hover:bg-slate-50"
+        className="flex items-center justify-between w-full px-3 py-2 mt-1 text-left bg-white border rounded-lg hover:bg-slate-50 h-[42px]"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -170,7 +170,7 @@ function MultiSelectDropdown({
           {/* Listado */}
           <div className="p-1 overflow-auto max-h-64">
             {filtered.length === 0 ? (
-              <div className="px-3 py-4 text-sm text-slate-500">{emptyText}</div>
+              <div className="px-3 py-4 text-sm text-slate-500">Sin resultados</div>
             ) : (
               filtered.map((o) => {
                 const checked = value.includes(o.value);
@@ -223,8 +223,8 @@ export default function EliminarCuposPage() {
   const [horaDesde, setHoraDesde] = useState<string>(""); // HH:MM
   const [horaHasta, setHoraHasta] = useState<string>(""); // HH:MM
   const [eps, setEps] = useState<string>("");
-  const [especialidad, setEspecialidad] = useState<string>("");
-  const [medicosSel, setMedicosSel] = useState<string[]>([]); // valores del dropdown
+  const [especialidadesSel, setEspecialidadesSel] = useState<string[]>([]);
+  const [medicosSel, setMedicosSel] = useState<string[]>([]);
 
   // Catálogos
   const [epsOpts, setEpsOpts] = useState<Option[]>([]);
@@ -292,24 +292,43 @@ export default function EliminarCuposPage() {
     })();
   }, []);
 
-  // Médicos dependientes de especialidad
+  // Médicos dependientes de especialidad (múltiples)
   useEffect(() => {
     (async () => {
       try {
-        const qs = new URLSearchParams();
-        if (especialidad) qs.set("especialidad", especialidad);
-        const url = "/api/catalog/medicos" + (qs.toString() ? `?${qs.toString()}` : "");
-        const r = await fetch(url);
-        const { options } = await r.json();
-        setMedOpts(options || []);
+        setMedicosSel([]);
+
+        // Si no hay especialidades: traer todos los médicos (comportamiento útil para "sin filtro")
+        if (especialidadesSel.length === 0) {
+          const rAll = await fetch("/api/catalog/medicos");
+          const { options: all } = await rAll.json().catch(() => ({ options: [] }));
+          setMedOpts(all || []);
+          return;
+        }
+
+        // 1) Preferir parámetros repetidos: ?especialidad=016&especialidad=022
+        const qs1 = new URLSearchParams();
+        especialidadesSel.forEach((e) => qs1.append("especialidad", e));
+        let r = await fetch(`/api/catalog/medicos?${qs1.toString()}`);
+        let j = await r.json().catch(() => ({ options: [] as Option[] }));
+        let opts = j?.options ?? [];
+
+        // 2) Fallback CSV: ?especialidad=016,022 (por compatibilidad con backend)
+        if (!opts.length) {
+          const csv = especialidadesSel.join(",");
+          const qs2 = new URLSearchParams({ especialidad: csv });
+          r = await fetch(`/api/catalog/medicos?${qs2.toString()}`);
+          j = await r.json().catch(() => ({ options: [] as Option[] }));
+          opts = j?.options ?? [];
+        }
+
+        setMedOpts(opts || []);
       } catch (e) {
         console.error(e);
         setMedOpts([]);
-      } finally {
-        setMedicosSel([]); // reset selección si cambia la especialidad
       }
     })();
-  }, [especialidad]);
+  }, [especialidadesSel]);
 
   /* ============================ Acciones ============================ */
 
@@ -336,7 +355,8 @@ export default function EliminarCuposPage() {
         horaDesde: horaDesde || undefined,
         horaHasta: horaHasta || undefined,
         eps: eps || undefined,
-        especialidad: especialidad || undefined,
+        // Enviamos como CSV (el API ya lo venía usando así en /list)
+        especialidad: especialidadesSel.length ? especialidadesSel.join(",") : undefined,
         medicos: medicosSel.length ? medicosSel : undefined,
       };
 
@@ -431,7 +451,7 @@ export default function EliminarCuposPage() {
 
   const resetFiltros = () => {
     setEps("");
-    setEspecialidad("");
+    setEspecialidadesSel([]);
     setMedicosSel([]);
     setHoraDesde("");
     setHoraHasta("");
@@ -466,14 +486,14 @@ export default function EliminarCuposPage() {
           <h2 className="mb-4 font-medium">Filtros</h2>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-            {/* Fechas */}
+            {/* Fila 1: Fechas, Horas, EPS */}
             <div className="col-span-6 md:col-span-2">
               <label className="text-sm text-slate-700">Desde</label>
               <input
                 type="date"
                 value={desde}
                 onChange={(e) => setDesde(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
+                className="w-full px-3 py-2 mt-1 border rounded-lg h-[42px]"
               />
             </div>
             <div className="col-span-6 md:col-span-2">
@@ -482,18 +502,17 @@ export default function EliminarCuposPage() {
                 type="date"
                 value={hasta}
                 onChange={(e) => setHasta(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
+                className="w-full px-3 py-2 mt-1 border rounded-lg h-[42px]"
               />
             </div>
 
-            {/* Rango de horas */}
             <div className="col-span-6 md:col-span-2">
               <label className="text-sm text-slate-700">Hora desde</label>
               <input
                 type="time"
                 value={horaDesde}
                 onChange={(e) => setHoraDesde(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
+                className="w-full px-3 py-2 mt-1 border rounded-lg h-[42px]"
               />
             </div>
             <div className="col-span-6 md:col-span-2">
@@ -502,17 +521,16 @@ export default function EliminarCuposPage() {
                 type="time"
                 value={horaHasta}
                 onChange={(e) => setHoraHasta(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
+                className="w-full px-3 py-2 mt-1 border rounded-lg h-[42px]"
               />
             </div>
 
-            {/* EPS */}
-            <div className="col-span-6 md:col-span-2">
+            <div className="col-span-12 md:col-span-4">
               <label className="text-sm text-slate-700">EPS</label>
               <select
                 value={eps}
                 onChange={(e) => setEps(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
+                className="w-full px-3 py-2 mt-1 border rounded-lg h-[42px]"
               >
                 {[{ value: "", label: "Todas" }, ...epsOpts].map((o) => (
                   <option key={o.value || "all"} value={o.value}>
@@ -522,24 +540,8 @@ export default function EliminarCuposPage() {
               </select>
             </div>
 
-            {/* Especialidad */}
-            <div className="col-span-6 md:col-span-2">
-              <label className="text-sm text-slate-700">Especialidad</label>
-              <select
-                value={especialidad}
-                onChange={(e) => setEspecialidad(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
-              >
-                {[{ value: "", label: "Todas" }, ...espOpts].map((o) => (
-                  <option key={o.value || "all"} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Médicos (dropdown multi) */}
-            <div className="col-span-12 md:col-span-4">
+            {/* Fila 2: Especialidad y Médicos lado a lado */}
+            <div className="col-span-12 md:col-span-6">
               <label className="text-sm text-slate-700">Médicos</label>
               <MultiSelectDropdown
                 options={medOpts}
@@ -559,6 +561,31 @@ export default function EliminarCuposPage() {
                   Limpiar selección ({medicosSel.length})
                 </button>
                 <span className="text-slate-500">{medicosSel.length} seleccionado(s)</span>
+              </div>
+            </div>
+
+            <div className="col-span-12 md:col-span-6">
+              <label className="text-sm text-slate-700">Especialidad</label>
+              <MultiSelectDropdown
+                options={espOpts.filter((o) => o.value !== "")}
+                value={especialidadesSel}
+                onChange={setEspecialidadesSel}
+                placeholder="Selecciona especialidades..."
+                labelSearch="Buscar especialidad..."
+                className="w-full"
+              />
+              <div className="flex items-center gap-2 mt-2 text-sm">
+                <button
+                  onClick={() => setEspecialidadesSel([])}
+                  className="px-3 py-1.5 border rounded-lg"
+                  disabled={especialidadesSel.length === 0}
+                  title="Limpiar selección"
+                >
+                  Limpiar selección ({especialidadesSel.length})
+                </button>
+                <span className="text-slate-500">
+                  {especialidadesSel.length} seleccionada(s)
+                </span>
               </div>
             </div>
           </div>
