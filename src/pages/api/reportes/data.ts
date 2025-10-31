@@ -1,3 +1,4 @@
+// src/pages/api/reportes/data.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { prisma } from "@/lib/prisma";
 import {
@@ -26,35 +27,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
 
     const parsed = FiltrosSchema.parse(req.body);
-    const { eps, especialidad, medico } = parsed;
 
-    // where base: fechas + estados (NO incluye eps/especialidad/medico)
+    // ---- compatibilidad: aceptar singular o array ----
+    const p: any = parsed;
+    const eps: string | undefined = p.eps || undefined;
+
+    const especialidades: string[] = Array.isArray(p.especialidades)
+      ? p.especialidades
+      : p.especialidad
+      ? [p.especialidad]
+      : [];
+
+    const medicos: string[] = Array.isArray(p.medicos)
+      ? p.medicos
+      : p.medico
+      ? [p.medico]
+      : [];
+
+    // where base: fechas + estados (NO incluye eps/especialidad/medicos)
     const whereAgendaBase = buildWherePrisma(parsed);
 
     // --- Construimos el where final sobre AGENDA ---
-    // Especialidad => mapear a CUPS y filtrar por agenda.TipoCita
     let whereAgenda: any = { ...whereAgendaBase };
 
-    if (especialidad) {
-      const spec = await prisma.tvespecialidades.findUnique({
-        where: { CodigoEspecialidad: especialidad },
+    // Especialidades -> mapear a lista de CUPS y filtrar por agenda.TipoCita IN (...)
+    if (especialidades.length > 0) {
+      const specs = await prisma.tvespecialidades.findMany({
+        where: { CodigoEspecialidad: { in: especialidades } },
         select: { CUPS: true },
       });
+      const cupsList = specs
+        .map((s) => (s.CUPS ?? "").trim())
+        .filter((x) => x.length > 0);
 
-      const cups = spec?.CUPS?.trim();
-      if (!cups) {
-        // Si no hay CUPS para esa especialidad, no debería traer nada
+      if (cupsList.length === 0) {
         return res.status(200).json({ rows: [] });
       }
 
-      // En tu BD `agenda.TipoCita` guarda el CUPS (ej. "890203")
-      // Usamos igualdad exacta; si necesitaras prefijo, cambia a { startsWith: cups }
-      whereAgenda = { ...whereAgenda, TipoCita: { equals: cups } };
+      whereAgenda = { ...whereAgenda, TipoCita: { in: cupsList } };
     }
 
-    // Médico => filtrar por agenda.idmedico
-    if (medico) {
-      whereAgenda = { ...whereAgenda, idmedico: { equals: medico } };
+    // Médicos -> filtrar por agenda.idmedico IN (...)
+    if (medicos.length > 0) {
+      whereAgenda = { ...whereAgenda, idmedico: { in: medicos } };
     }
 
     // ===== Igual que antes: dos caminos (con / sin EPS) =====
@@ -81,8 +96,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               const n = parseInt((r.idusuario ?? "").trim(), 10);
               return Number.isFinite(n) ? n : null;
             })
-            .filter((v): v is number => v !== null),
-        ),
+            .filter((v): v is number => v !== null)
+        )
       );
       const missing = ids.filter((id) => !userCache.has(id));
       if (missing.length) {
@@ -155,7 +170,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ rows });
     }
 
-    // Con EPS ⇒ escaneo incremental hasta juntar suficientes coincidencias (pre-filtrado por TipoCita/medico ya aplicado)
+    // Con EPS ⇒ escaneo incremental (whereAgenda ya incluye filtros de especialidad y médicos)
     const TARGET_END = parsed.offset + parsed.limit;
     const BATCH = 2000;
     const SCAN_CAP = 200_000;

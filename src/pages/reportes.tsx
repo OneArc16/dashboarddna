@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "react-hot-toast";
 import Head from "next/head";
+import MultiSelectRS from "@/components/MultiSelectRS"; // componente basado en react-select
 
 /* ============================ Tipos y helpers ============================ */
 
@@ -60,8 +61,15 @@ export default function ReportesPage() {
   const [desde, setDesde] = useState<string>("");
   const [hasta, setHasta] = useState<string>("");
   const [eps, setEps] = useState<string>("");
+
+  // (estados legacy, se mantienen por compatibilidad)
   const [especialidad, setEspecialidad] = useState<string>("");
   const [medico, setMedico] = useState<string>("");
+
+  // Multi-select (nuevo)
+  const [espSel, setEspSel] = useState<Option[]>([]);
+  const [medSel, setMedSel] = useState<Option[]>([]);
+
   const [limit, setLimit] = useState<LimitValue>(1000);
 
   const [checkAsignada, setCheckAsignada] = useState(true);
@@ -109,6 +117,7 @@ export default function ReportesPage() {
     }
     setStats(next);
     setTotal(data.length);
+    return next; // útil para toasts inmediatos
   }
 
   useEffect(() => {
@@ -127,8 +136,11 @@ export default function ReportesPage() {
         const { options: epsOptions } = await rEps.json();
         const { options: espOptions } = await rEsp.json();
 
+        // EPS mantiene "Todas"
         setEpsOpts([{ value: "", label: "Todas" }, ...epsOptions]);
-        setEspOpts([{ value: "", label: "Todas" }, ...espOptions]);
+
+        // MultiSelect no necesita "Todas"
+        setEspOpts(espOptions);
       } catch (e) {
         console.error(e);
         toast.error("No fue posible cargar catálogos.");
@@ -136,23 +148,28 @@ export default function ReportesPage() {
     })();
   }, []);
 
-  // Médicos dependientes de especialidad
+  // Cargar MÉDICOS según las especialidades seleccionadas
   useEffect(() => {
     (async () => {
       try {
         const qs = new URLSearchParams();
-        if (especialidad) qs.set("especialidad", especialidad);
-        const url =
-          "/api/catalog/medicos" + (qs.toString() ? `?${qs.toString()}` : "");
+        // API soporta ?especialidades=016&especialidades=036
+        espSel.forEach((es) => qs.append("especialidades", es.value));
+
+        const url = "/api/catalog/medicos" + (qs.toString() ? `?${qs.toString()}` : "");
         const r = await fetch(url);
         const { options } = await r.json();
-        setMedOpts([{ value: "", label: "Todos" }, ...(options || [])]);
+
+        setMedOpts(options || []);
+        // si alguno seleccionado ya no está, se limpia
+        setMedSel((prev) => prev.filter((m) => (options || []).some((o: Option) => o.value === m.value)));
       } catch (e) {
         console.error(e);
-        setMedOpts([{ value: "", label: "Todos" }]);
+        setMedOpts([]);
+        setMedSel([]);
       }
     })();
-  }, [especialidad]);
+  }, [espSel]);
 
   /* ============================ Acciones ============================ */
 
@@ -174,8 +191,8 @@ export default function ReportesPage() {
         desde,
         hasta,
         eps: eps || undefined,
-        especialidad: especialidad || undefined,
-        medico: medico || undefined,
+        especialidades: espSel.map((o) => o.value), // arrays
+        medicos: medSel.map((o) => o.value),
         estados: estadosSeleccionados,
         limit: limitToSend,
         offset: 0,
@@ -194,8 +211,11 @@ export default function ReportesPage() {
 
       const data = (await r.json()) as { rows: Row[] };
       setRows(data.rows);
-      recomputeStats(data.rows);
-      toast.success(`Se cargaron ${data.rows?.length ?? 0} registros`);
+      const localStats = recomputeStats(data.rows);
+
+      toast.success(
+        `Resultados: ${data.rows.length} | Asignadas: ${localStats.ASIGNADA} | Atendidas: ${localStats.ATENDIDA} | Activadas: ${localStats.CUMPLIDA} | Sin asignar: ${localStats.SIN_ASIGNAR}`
+      );
     } catch (e: any) {
       console.error("Buscar error:", e);
       toast.error(e?.message ?? "Error al buscar.");
@@ -214,17 +234,18 @@ export default function ReportesPage() {
     q.set("hasta", hasta);
     estadosSeleccionados.forEach((s) => q.append("estados", s));
     if (eps) q.set("eps", eps);
-    if (especialidad) q.set("especialidad", especialidad);
-    if (medico) q.set("medico", medico);
+    espSel.forEach((o) => q.append("especialidades", o.value));
+    medSel.forEach((o) => q.append("medicos", o.value));
 
-    // Dispara descarga
     window.open(`/api/reportes/export?${q.toString()}`, "_blank");
   };
 
   const resetFiltros = () => {
     setEps("");
-    setEspecialidad("");
-    setMedico("");
+    setEspecialidad(""); // legacy
+    setMedico("");       // legacy
+    setEspSel([]);
+    setMedSel([]);
     setCheckAsignada(true);
     setCheckAtendida(true);
     setCheckCumplida(true);
@@ -256,34 +277,35 @@ export default function ReportesPage() {
         <div className="p-4 border rounded-2xl">
           <h2 className="mb-4 font-medium">Filtros</h2>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
+          {/* Grid 12 columnas para alinear mejor */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
             {/* Fechas */}
-            <div className="col-span-1 md:col-span-1">
+            <div className="md:col-span-3">
               <label className="text-sm text-slate-700">Desde</label>
               <input
                 type="date"
                 value={desde}
                 onChange={(e) => setDesde(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
+                className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg"
               />
             </div>
-            <div className="col-span-1 md:col-span-1">
+            <div className="md:col-span-3">
               <label className="text-sm text-slate-700">Hasta</label>
               <input
                 type="date"
                 value={hasta}
                 onChange={(e) => setHasta(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
+                className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg"
               />
             </div>
 
             {/* EPS */}
-            <div className="col-span-1 md:col-span-1">
+            <div className="md:col-span-3">
               <label className="text-sm text-slate-700">EPS</label>
               <select
                 value={eps}
                 onChange={(e) => setEps(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
+                className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg"
               >
                 {epsOpts.map((o) => (
                   <option key={o.value || "all"} value={o.value}>
@@ -293,47 +315,15 @@ export default function ReportesPage() {
               </select>
             </div>
 
-            {/* Especialidad */}
-            <div className="col-span-1 md:col-span-1">
-              <label className="text-sm text-slate-700">Especialidad</label>
-              <select
-                value={especialidad}
-                onChange={(e) => setEspecialidad(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
-              >
-                {espOpts.map((o) => (
-                  <option key={o.value || "all"} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Médico */}
-            <div className="col-span-1 md:col-span-1">
-              <label className="text-sm text-slate-700">Médico</label>
-              <select
-                value={medico}
-                onChange={(e) => setMedico(e.target.value)}
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
-              >
-                {medOpts.map((o) => (
-                  <option key={o.value || "all"} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             {/* Registros por página */}
-            <div className="col-span-1 md:col-span-1">
+            <div className="md:col-span-3">
               <label className="text-sm text-slate-700">Registros por página</label>
               <select
                 value={limit === "ALL" ? "ALL" : String(limit)}
                 onChange={(e) =>
                   setLimit(e.target.value === "ALL" ? "ALL" : Number(e.target.value))
                 }
-                className="w-full px-3 py-2 mt-1 border rounded-lg"
+                className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg"
               >
                 {[100, 500, 1000, 5000].map((n) => (
                   <option key={n} value={n}>
@@ -343,70 +333,112 @@ export default function ReportesPage() {
                 <option value="ALL">Todos</option>
               </select>
             </div>
-          </div>
 
-          {/* Estados */}
-          <div className="grid grid-cols-2 gap-2 mt-3 md:grid-cols-4">
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={checkAsignada}
-                onChange={(e) => setCheckAsignada(e.target.checked)}
+            {/* Especialidad (MultiSelect) */}
+            <div className="md:col-span-6">
+              <MultiSelectRS
+                label="Especialidad"
+                options={espOpts}
+                value={espSel}
+                onChange={setEspSel}
               />
-              Asignadas
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={checkAtendida}
-                onChange={(e) => setCheckAtendida(e.target.checked)}
-              />
-              Atendidas
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={checkCumplida}
-                onChange={(e) => setCheckCumplida(e.target.checked)}
-              />
-              Activadas
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={checkSinAsignar}
-                onChange={(e) => setCheckSinAsignar(e.target.checked)}
-              />
-              Sin asignar
-            </label>
-          </div>
+              <div className="flex items-center gap-3 mt-1 text-xs text-slate-600">
+                <button
+                  type="button"
+                  onClick={() => setEspSel([])}
+                  className="px-2 py-1 border rounded"
+                >
+                  Limpiar selección ({espSel.length})
+                </button>
+                <span>{espSel.length} seleccionada(s)</span>
+              </div>
+            </div>
 
-          <div className="flex items-center gap-3 mt-4">
-            <button
-              onClick={handleBuscar}
-              disabled={loading}
-              className="px-4 py-2 text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-60"
-            >
-              {loading ? "Buscando..." : "Buscar"}
-            </button>
-            <button
-              onClick={resetFiltros}
-              className="px-4 py-2 border rounded-xl text-slate-700 hover:bg-slate-50"
-            >
-              Limpiar filtros
-            </button>
+            {/* Médico (MultiSelect) */}
+            <div className="md:col-span-6">
+              <MultiSelectRS
+                label="Médico"
+                options={medOpts}
+                value={medSel}
+                onChange={setMedSel}
+              />
+              <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-slate-600">
+                <button
+                  type="button"
+                  onClick={() => setMedSel([])}
+                  className="px-2 py-1 border rounded"
+                >
+                  Limpiar selección ({medSel.length})
+                </button>
+                <span>{medSel.length} seleccionado(s)</span>
+                <span className="text-slate-500">
+                  Mostrando {medOpts.length} médico(s) para {espSel.length || "todas"} especialidad(es).
+                </span>
+              </div>
+            </div>
+
+            {/* Estados */}
+            <div className="md:col-span-12">
+              <div className="grid grid-cols-2 gap-2 mt-1 md:grid-cols-4">
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={checkAsignada}
+                    onChange={(e) => setCheckAsignada(e.target.checked)}
+                  />
+                  Asignadas
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={checkAtendida}
+                    onChange={(e) => setCheckAtendida(e.target.checked)}
+                  />
+                  Atendidas
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={checkCumplida}
+                    onChange={(e) => setCheckCumplida(e.target.checked)}
+                  />
+                  Activadas
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={checkSinAsignar}
+                    onChange={(e) => setCheckSinAsignar(e.target.checked)}
+                  />
+                  Sin asignar
+                </label>
+              </div>
+            </div>
+
+            {/* Botones */}
+            <div className="flex items-center gap-3 mt-2 md:col-span-12">
+              <button
+                onClick={handleBuscar}
+                disabled={loading}
+                className="px-4 py-2 text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-60"
+              >
+                {loading ? "Buscando..." : "Buscar"}
+              </button>
+              <button
+                onClick={resetFiltros}
+                className="px-4 py-2 border rounded-xl text-slate-700 hover:bg-slate-50"
+              >
+                Limpiar filtros
+              </button>
+            </div>
           </div>
         </div>
 
         {/* --------- Resultados --------- */}
         <div className="p-4 mt-6 border rounded-2xl">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="font-medium">
-              Resultados ({total})
-            </h3>
-            <div className="text-sm text-slate-500">
-              Mostrando {rows.length} registro(s)
-            </div>
+            <h3 className="font-medium">Resultados ({total})</h3>
+            <div className="text-sm text-slate-500">Mostrando {rows.length} registro(s)</div>
           </div>
 
           {/* Resumen por estado */}

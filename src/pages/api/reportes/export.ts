@@ -1,3 +1,4 @@
+// src/pages/api/reportes/export.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import ExcelJS from "exceljs";
 import { prisma } from "@/lib/prisma";
@@ -10,23 +11,68 @@ import {
   MAX_LIMIT,
 } from "@/lib/reportes";
 
-function qstr(q: any, k: string) {
+/** Lee un string desde query (primero si viene repetido) */
+function qstr(q: any, k: string): string | undefined {
   const v = q?.[k];
-  return Array.isArray(v) ? v[0] : v;
+  if (v == null) return undefined;
+  return Array.isArray(v) ? String(v[0]) : String(v);
+}
+
+/** Lee un arreglo desde query. Acepta ?k=a&k=b y CSV (?k=a,b) */
+function qarr(q: any, k: string): string[] {
+  const v = q?.[k];
+  if (v == null) return [];
+  const parts = Array.isArray(v) ? v : [v];
+  return parts
+    .flatMap((p) => String(p).split(","))
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Crea y envía un Excel vacío (solo headers) */
+async function sendEmptyExcel(res: NextApiResponse, nombre: string) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Reporte");
+  ws.columns = [
+    { header: "ID Cita", key: "cita_id", width: 12 },
+    { header: "Fecha", key: "fecha", width: 12 },
+    { header: "Hora", key: "hora", width: 10 },
+    { header: "Paciente", key: "paciente", width: 35 },
+    { header: "EPS", key: "eps", width: 12 },
+    { header: "ID Médico", key: "idmedico", width: 14 },
+    { header: "Médico", key: "medico", width: 35 },
+    { header: "Estado", key: "estado", width: 14 },
+    { header: "Tipo Cita (CUPS)", key: "tipo_cita", width: 18 },
+  ];
+  ws.getRow(1).font = { bold: true };
+
+  const buf = await wb.xlsx.writeBuffer();
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="${nombre}.xlsx"`);
+  res.status(200).send(Buffer.from(buf));
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     if (req.method !== "GET") return res.status(405).end("Method Not Allowed");
 
-    // Leer filtros desde query
+    // --- Leer filtros desde query (singulares + arrays) ---
     const desde = qstr(req.query, "desde") || "";
     const hasta = qstr(req.query, "hasta") || "";
     const eps = qstr(req.query, "eps") || undefined;
+
+    // Compatibilidad: singulares
     const especialidad = qstr(req.query, "especialidad") || undefined;
     const medico = qstr(req.query, "medico") || undefined;
 
-    // estados puede venir como "A,B,C" o repetidos ?estados=A&estados=B
+    // Arrays nuevos
+    const especialidades = qarr(req.query, "especialidades");
+    const medicos = qarr(req.query, "medicos");
+
+    // Estados (?estados=A&estados=B o CSV)
     const estadosParam = req.query.estados;
     const estados =
       estadosParam == null
@@ -35,62 +81,48 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ? estadosParam
         : String(estadosParam).split(",").map((s) => s.trim());
 
-    // Normalizamos con schema; para export usamos MAX_LIMIT y offset 0
+    // Normalizar con el mismo schema (agrega singulares a los arrays)
     const parsed = FiltrosSchema.parse({
       desde,
       hasta,
       eps,
       especialidad,
+      especialidades,
       medico,
+      medicos,
       estados,
-      limit: MAX_LIMIT,
+      limit: MAX_LIMIT, // export siempre a tope
       offset: 0,
     });
 
-    // WHERE base (fechas + estados)
+    // --- WHERE base (fechas + estados) sobre agenda ---
     let whereAgenda: any = buildWherePrisma(parsed);
 
-    // Especialidad => filtra por CUPS en agenda.TipoCita
-    if (parsed.especialidad) {
-      const spec = await prisma.tvespecialidades.findUnique({
-        where: { CodigoEspecialidad: parsed.especialidad },
+    // Especialidades -> mapear a CUPS en tvespecialidades y filtrar por agenda.TipoCita IN (cups)
+    if (parsed.especialidades && parsed.especialidades.length) {
+      const specs = await prisma.tvespecialidades.findMany({
+        where: { CodigoEspecialidad: { in: parsed.especialidades } },
         select: { CUPS: true },
       });
-      const cups = spec?.CUPS?.trim();
-      if (!cups) {
-        // Devuelve Excel vacío con headers
-        const wb = new ExcelJS.Workbook();
-        const ws = wb.addWorksheet("Reporte");
-        ws.columns = [
-          { header: "ID Cita", key: "cita_id", width: 12 },
-          { header: "Fecha", key: "fecha", width: 12 },
-          { header: "Hora", key: "hora", width: 10 },
-          { header: "Paciente", key: "paciente", width: 35 },
-          { header: "EPS", key: "eps", width: 12 },
-          { header: "ID Médico", key: "idmedico", width: 14 },
-          { header: "Médico", key: "medico", width: 35 },
-          { header: "Estado", key: "estado", width: 14 },
-          { header: "Tipo Cita (CUPS)", key: "tipo_cita", width: 18 },
-        ];
-        ws.getRow(1).font = { bold: true };
-        const buf = await wb.xlsx.writeBuffer();
-        res.setHeader(
-          "Content-Type",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      const cups = Array.from(
+        new Set(specs.map((s) => s.CUPS?.trim()).filter(Boolean))
+      ) as string[];
+
+      if (!cups.length) {
+        return sendEmptyExcel(
+          res,
+          `reporte_${parsed.desde}_a_${parsed.hasta}`
         );
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="reporte_${parsed.desde}_a_${parsed.hasta}.xlsx"`
-        );
-        return res.status(200).send(Buffer.from(buf));
       }
-      whereAgenda = { ...whereAgenda, TipoCita: { equals: cups } };
+      whereAgenda = { ...whereAgenda, TipoCita: { in: cups } };
     }
 
-    // Médico
-    if (parsed.medico) whereAgenda = { ...whereAgenda, idmedico: parsed.medico };
+    // Médicos -> agenda.idmedico IN (...)
+    if (parsed.medicos && parsed.medicos.length) {
+      whereAgenda = { ...whereAgenda, idmedico: { in: parsed.medicos } };
+    }
 
-    // Recolectamos todas las filas (aplicando EPS al vuelo)
+    // --- Recolectar filas aplicando EPS al vuelo (sin JOIN) ---
     const rowsOut: Array<{
       cita_id: number | null;
       fecha: string;
@@ -125,7 +157,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!batch.length) break;
       skip += BATCH;
 
-      // Hydrate users y médicos
+      // Hydrate usuarios (para EPS y nombre)
       const userIds = Array.from(
         new Set(
           batch
@@ -148,6 +180,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         : [];
       const mUsers = new Map(users.map((u) => [u.IdUsuario, u]));
 
+      // Hydrate médicos
       const docIds = Array.from(
         new Set(batch.map((b) => b.idmedico).filter((x): x is string => !!x))
       );
@@ -163,7 +196,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const idn = parseInt((a.idusuario ?? "").trim(), 10);
         const u = Number.isFinite(idn) ? mUsers.get(idn) : undefined;
 
-        // Filtra por EPS si viene
+        // EPS (si se envió) -> filtrar aquí
         if (parsed.eps && u?.Codigo_eps !== parsed.eps) continue;
 
         const d = a.idmedico ? mDocs.get(a.idmedico) : undefined;
@@ -184,7 +217,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // ===== Excel sin fila de "Filtros" =====
+    // --- Excel sin fila "Filtros" ---
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Reporte");
 
@@ -214,6 +247,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).send(Buffer.from(buf));
   } catch (e: any) {
     console.error("API /reportes/export error:", e);
-    res.status(500).json({ error: e?.message ?? "Error" });
+    return res.status(500).json({ error: e?.message ?? "Error" });
   }
 }
