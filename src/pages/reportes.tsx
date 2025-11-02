@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "react-hot-toast";
 import Head from "next/head";
 import MultiSelectRS from "@/components/MultiSelectRS"; // componente basado en react-select
+import ModulesMenu from "@/components/ModulesMenu";
 
 /* ============================ Tipos y helpers ============================ */
 
@@ -31,12 +32,7 @@ const STATUS_META: Record<StatKey, { label: string; dot: string }> = {
   CUMPLIDA: { label: "Activadas", dot: "bg-indigo-500" },
   SIN_ASIGNAR: { label: "Cupos libres", dot: "bg-zinc-400" },
 };
-const STATUS_ORDER: StatKey[] = [
-  "ASIGNADA",
-  "ATENDIDA",
-  "CUMPLIDA",
-  "SIN_ASIGNAR",
-];
+const STATUS_ORDER: StatKey[] = ["ASIGNADA", "ATENDIDA", "CUMPLIDA", "SIN_ASIGNAR"];
 
 const normalize = (s?: string | null) =>
   (s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
@@ -49,6 +45,37 @@ const estadoKey = (s?: string | null): StatKey | null => {
   if (v.startsWith("SIN ASIGNAR")) return "SIN_ASIGNAR";
   return null;
 };
+
+// Badges de estado (añadido)
+const BADGE_META: Record<StatKey, { label: string; cls: string }> = {
+  ASIGNADA: {
+    label: "Asignada",
+    cls: "bg-amber-100 text-amber-900 border border-amber-200",
+  },
+  ATENDIDA: {
+    label: "Atendido",
+    cls: "bg-emerald-100 text-emerald-900 border border-emerald-200",
+  },
+  CUMPLIDA: {
+    label: "Activada",
+    cls: "bg-indigo-100 text-indigo-900 border border-indigo-200",
+  },
+  SIN_ASIGNAR: {
+    label: "Sin asignar",
+    cls: "bg-zinc-100 text-zinc-800 border border-zinc-200",
+  },
+};
+
+function EstadoBadge({ estado }: { estado: string | null }) {
+  const k = estadoKey(estado);
+  if (!k) return <span>{estado ?? ""}</span>;
+  const meta = BADGE_META[k];
+  return (
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium inline-block ${meta.cls}`}>
+      {meta.label}
+    </span>
+  );
+}
 
 // Debe coincidir con el tope del backend (MAX_LIMIT)
 const ALL_LIMIT = 1_000_000;
@@ -264,13 +291,16 @@ export default function ReportesPage() {
       <div className="px-4 py-6 mx-auto max-w-7xl">
         <div className="flex items-center justify-between mb-5">
           <h1 className="text-2xl font-semibold">Reportes DNAPLUS</h1>
-          <button
-            onClick={handleExport}
-            className="inline-flex items-center gap-2 px-4 py-2 text-white bg-black rounded-xl hover:opacity-90"
-            title="Descargar Excel"
-          >
-            <span>📥</span> Descargar
-          </button>
+          <div className="flex items-center gap-2">
+            <ModulesMenu />
+            <button
+              onClick={handleExport}
+              className="inline-flex items-center gap-2 px-4 py-2 text-white bg-black rounded-xl hover:opacity-90"
+              title="Descargar Excel"
+            >
+              <span>📥</span> Descargar
+            </button>
+          </div>
         </div>
 
         {/* --------- Filtros --------- */}
@@ -498,7 +528,9 @@ export default function ReportesPage() {
                     <td className="px-3 py-2">{r.eps ?? ""}</td>
                     <td className="px-3 py-2">{r.idmedico ?? ""}</td>
                     <td className="px-3 py-2">{r.medico ?? ""}</td>
-                    <td className="px-3 py-2">{r.estado ?? ""}</td>
+                    <td className="px-3 py-2">
+                      <EstadoBadge estado={r.estado} />
+                    </td>
                     <td className="px-3 py-2">{r.tipo_cita ?? ""}</td>
                   </tr>
                 ))}

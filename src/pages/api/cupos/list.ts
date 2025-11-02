@@ -4,6 +4,17 @@ import { prisma } from "@/lib/prisma";
 
 type AnyRec = Record<string, any>;
 
+const FALLBACK_CUPS: Record<string, string> = {
+  "016": "890201", // Medicina General
+  "022": "890203", // Odontología
+  "062": "890262", // Medicina Laboral
+  "036": "890206", // Nutrición
+};
+
+function uniq<T>(arr: T[]) {
+  return Array.from(new Set(arr));
+}
+
 function toList(v: unknown): string[] {
   if (!v) return [];
   if (Array.isArray(v)) {
@@ -21,43 +32,57 @@ function toList(v: unknown): string[] {
   return [];
 }
 
-function dateOnly(d: string): Date {
-  // columna es @db.Date, el tiempo se ignora, basta con un Date del día
-  return new Date(`${d}T00:00:00.000Z`);
+function dateOnlyUTC(yyyyMmDd: string): Date {
+  // agenda.fecha_cita es DATE sin hora: basta con la fecha UTC 00:00
+  return new Date(`${yyyyMmDd}T00:00:00.000Z`);
+}
+
+function buildNombre(u: {
+  Primer_nombre: string | null;
+  Segundo_nombre: string | null;
+  Primer_apellido: string | null;
+  Segundo_apellido: string | null;
+}) {
+  return [
+    u.Primer_nombre,
+    u.Segundo_nombre,
+    u.Primer_apellido,
+    u.Segundo_apellido,
+  ]
+    .map((x) => (x ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
 
-    const body = req.body ?? {};
-    const { desde, hasta } = body as { desde?: string; hasta?: string };
+    const b = req.body ?? {};
 
-    const horaDesde: string | undefined = body.horaDesde || undefined; // "HH:MM"
-    const horaHasta: string | undefined = body.horaHasta || undefined;
-    const eps: string | undefined = body.eps || undefined;
+    const desde: string | undefined = b.desde || undefined;
+    const hasta: string | undefined = b.hasta || undefined;
+    const horaDesde: string | undefined = b.horaDesde || undefined; // "HH:MM"
+    const horaHasta: string | undefined = b.horaHasta || undefined; // "HH:MM"
+    const eps: string | undefined = b.eps || undefined;
 
-    // Unificamos entradas posibles
-    const espList = Array.from(
-      new Set([
-        ...toList(body.especialidad),
-        ...toList(body.especialidades),
-        ...toList(body.especialidadCsv),
-        ...toList(body.especialidadesCsv),
-      ])
-    );
-    const medList = Array.from(
-      new Set([...toList(body.medicos), ...toList(body.medicosCsv)])
-    );
+    // Acepta múltiples formatos desde el front (array o CSV)
+    const especialidades = uniq([
+      ...toList(b.especialidad),
+      ...toList(b.especialidades),
+      ...toList(b.especialidadCsv),
+      ...toList(b.especialidadesCsv),
+    ]);
+    const medicos = uniq([...toList(b.medicos), ...toList(b.medicosCsv)]);
 
-    // Armado del where
+    // ----- WHERE base
     const where: AnyRec = {};
-
     if (desde && hasta) {
-      where.fecha_cita = {
-        gte: dateOnly(desde),
-        lte: dateOnly(hasta),
-      };
+      where.fecha_cita = { gte: dateOnlyUTC(desde), lte: dateOnlyUTC(hasta) };
+    } else if (desde) {
+      where.fecha_cita = { gte: dateOnlyUTC(desde) };
+    } else if (hasta) {
+      where.fecha_cita = { lte: dateOnlyUTC(hasta) };
     }
 
     const and: AnyRec[] = [];
@@ -65,54 +90,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (horaHasta) and.push({ idhora: { lte: horaHasta } });
     if (and.length) where.AND = and;
 
-    if (eps) {
-      // Si agenda guarda el código EPS aquí, filtramos directo.
-      // Si en tu caso se filtra por otra columna, cámbialo acá.
-      where.Entidad = eps;
-    }
+    if (eps) where.Entidad = eps;
 
-    // ===== CUPS dinámicos desde tvespecialidades =====
-    if (espList.length) {
-      // Saca los CUPS asociados a las especialidades seleccionadas
-      const cupsRows = await prisma.tvespecialidades.findMany({
-        where: { CodigoEspecialidad: { in: espList } },
+    // ----- Especialidades -> CUPS
+    if (especialidades.length) {
+      const tv = await prisma.tvespecialidades.findMany({
+        where: { CodigoEspecialidad: { in: especialidades } },
         select: { CUPS: true, CodigoEspecialidad: true },
       });
 
-      let cups = cupsRows
+      let cups = tv
         .map((r) => (r.CUPS || "").trim())
         .filter(Boolean);
 
-      // Fallback de los que ya nos pasaste (por si alguna especialidad no tiene CUPS en la tabla)
-      const fallback: Record<string, string> = {
-        "016": "890201", // Medicina General
-        "022": "890203", // Odontología
-        "062": "890262", // Medicina Laboral
-        "036": "890206", // Nutrición
-      };
-      for (const esp of espList) {
-        const fb = fallback[esp];
+      // complementar con fallbacks si falta alguno
+      for (const esp of especialidades) {
+        const fb = FALLBACK_CUPS[esp];
         if (fb && !cups.includes(fb)) cups.push(fb);
       }
+      cups = uniq(cups);
 
-      // Solo aplicar el filtro si hay CUPS
-      if (cups.length) {
-        where.TipoCita = { in: cups };
-      }
+      if (cups.length) where.TipoCita = { in: cups };
     }
 
-    // Médicos seleccionados
-    if (medList.length) {
-      where.idmedico = { in: medList };
+    // ----- Médicos
+    if (medicos.length) {
+      where.idmedico = { in: medicos };
     }
 
+    // ----- Consulta principal
     const agendas = await prisma.agenda.findMany({
       where,
       select: {
         idagenda: true,
         fecha_cita: true,
         idhora: true,
-        idusuario: true,
+        idusuario: true, // VARCHAR(18)
         idmedico: true,
         Estado: true,
         TipoCita: true,
@@ -122,33 +135,93 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       take: 5000,
     });
 
-    // Nombres de médicos (opcional pero útil)
-    const medIds = Array.from(
-      new Set(agendas.map((a) => a.idmedico).filter(Boolean) as string[])
+    // ===== Enriquecer con PACIENTE
+    const rawUserKeys = uniq(
+      agendas.map((a) => (a.idusuario || "").trim()).filter(Boolean)
     );
-    let medMap: Record<string, string> = {};
-    if (medIds.length) {
-      const ms = await prisma.empleados.findMany({
-        where: { C_digo_empleado: { in: medIds } },
-        select: { C_digo_empleado: true, Nombre_empleado: true },
+    const numericUserIds = rawUserKeys
+      .filter((x) => /^\d+$/.test(x))
+      .map((x) => Number(x));
+
+    let usuarios: Array<{
+      IdUsuario: number;
+      Identificaci_n_usuario: string;
+      Primer_nombre: string | null;
+      Segundo_nombre: string | null;
+      Primer_apellido: string | null;
+      Segundo_apellido: string | null;
+    }> = [];
+
+    if (rawUserKeys.length) {
+      usuarios = await prisma.usuarios.findMany({
+        where: {
+          OR: [
+            numericUserIds.length
+              ? ({ IdUsuario: { in: numericUserIds } } as any)
+              : undefined,
+            { Identificaci_n_usuario: { in: rawUserKeys } },
+          ].filter(Boolean) as any,
+        },
+        select: {
+          IdUsuario: true,
+          Identificaci_n_usuario: true,
+          Primer_nombre: true,
+          Segundo_nombre: true,
+          Primer_apellido: true,
+          Segundo_apellido: true,
+        },
       });
-      medMap = Object.fromEntries(
-        ms.map((m) => [m.C_digo_empleado, m.Nombre_empleado ?? m.C_digo_empleado])
-      );
     }
 
-    const rows = agendas.map((a) => ({
-      cita_id: a.idagenda,
-      fecha: a.fecha_cita.toISOString().slice(0, 10),
-      hora: a.idhora,
-      idusuario: a.idusuario ? Number(a.idusuario) : null,
-      paciente: null, // si luego quieres nombre, se puede enriquecer
-      eps: a.Entidad ?? null,
-      idmedico: a.idmedico,
-      medico: a.idmedico ? medMap[a.idmedico] ?? a.idmedico : null,
-      estado: a.Estado ?? null,
-      tipo_cita: a.TipoCita ?? null,
-    }));
+    const nombrePorDoc: Record<string, string> = {};
+    const nombrePorId: Record<number, string> = {};
+    for (const u of usuarios) {
+      const nom = buildNombre(u);
+      if (u.Identificaci_n_usuario)
+        nombrePorDoc[u.Identificaci_n_usuario] = nom;
+      if (typeof u.IdUsuario === "number") nombrePorId[u.IdUsuario] = nom;
+    }
+
+    // ===== Enriquecer con NOMBRE DEL MÉDICO
+    const codsMed = uniq(
+      agendas.map((a) => (a.idmedico || "").trim()).filter(Boolean)
+    );
+    const medRows =
+      codsMed.length > 0
+        ? await prisma.empleados.findMany({
+            where: { C_digo_empleado: { in: codsMed } },
+            select: { C_digo_empleado: true, Nombre_empleado: true },
+          })
+        : [];
+    const medicoPorCodigo: Record<string, string> = {};
+    for (const m of medRows) {
+      medicoPorCodigo[m.C_digo_empleado] =
+        m.Nombre_empleado ?? m.C_digo_empleado;
+    }
+
+    // ===== Respuesta
+    const rows = agendas.map((a) => {
+      const idu = (a.idusuario || "").trim();
+      let paciente: string | null = null;
+      if (idu) {
+        paciente =
+          nombrePorDoc[idu] ??
+          (/^\d+$/.test(idu) ? nombrePorId[Number(idu)] : undefined) ??
+          null;
+      }
+      return {
+        cita_id: a.idagenda,
+        fecha: a.fecha_cita.toISOString().slice(0, 10),
+        hora: a.idhora,
+        idusuario: idu || null, // <- string en el front
+        paciente,
+        eps: a.Entidad ?? null,
+        idmedico: a.idmedico,
+        medico: a.idmedico ? medicoPorCodigo[a.idmedico] ?? null : null,
+        estado: a.Estado ?? null,
+        tipo_cita: a.TipoCita ?? null,
+      };
+    });
 
     return res.status(200).json({ rows });
   } catch (err: any) {

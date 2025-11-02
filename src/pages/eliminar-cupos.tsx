@@ -1,10 +1,12 @@
 // src/pages/eliminar-cupos.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import Head from "next/head";
 import toast from "react-hot-toast";
 import MultiSelectRS, { type RSOption } from "@/components/MultiSelectRS";
+import { createPortal } from "react-dom";
+import ModulesMenu from "@/components/ModulesMenu";
 
 /* ============================ Tipos y helpers ============================ */
 
@@ -45,6 +47,110 @@ const estadoKey = (s?: string | null): StatKey | null => {
 
 const toValues = (arr: RSOption[]) => arr.map((o) => o.value);
 
+/* ============================ Confirm Dialog (Modal) ============================ */
+
+function useConfirmDialog() {
+  const [open, setOpen] = useState(false);
+  const resolverRef = useRef<((v: boolean) => void) | null>(null);
+  const ask = () =>
+    new Promise<boolean>((resolve) => {
+      resolverRef.current = resolve;
+      setOpen(true);
+    });
+  const onCancel = () => {
+    setOpen(false);
+    resolverRef.current?.(false);
+  };
+  const onAccept = () => {
+    setOpen(false);
+    resolverRef.current?.(true);
+  };
+  return { open, ask, onCancel, onAccept, setOpen };
+}
+
+function ConfirmModal({
+  open,
+  count,
+  onCancel,
+  onAccept,
+}: {
+  open: boolean;
+  count: number;
+  onCancel: () => void;
+  onAccept: () => void;
+}) {
+  const acceptRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    setTimeout(() => acceptRef.current?.focus(), 0);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
+  if (!open) return null;
+
+  const content = (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center" aria-modal="true" role="dialog">
+      {/* Overlay */}
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onCancel} />
+      {/* Card */}
+      <div className="relative w-full max-w-md mx-4 bg-white shadow-2xl rounded-2xl ring-1 ring-black/10">
+        <div className="px-6 pt-6 pb-5">
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center justify-center rounded-full size-10 bg-red-50 ring-1 ring-red-100">
+              <svg viewBox="0 0 24 24" className="w-5 h-5 text-red-600" fill="currentColor">
+                <path d="M9 3h6a1 1 0 0 1 .993.883L16 4h3a1 1 0 1 1 0 2h-1.05l-1.2 12.01A3 3 0 0 1 13.76 21H10.24a3 3 0 0 1-2.94-2.99L6.1 6H5a1 1 0 1 1 0-2h3l.007-.117A1 1 0 0 1 9 3Zm6.95 3H8.05l1.18 11.81a1 1 0 0 0 .99.9h3.54a1 1 0 0 0 .99-.9L15.95 6ZM9 8a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1Zm6 0a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1ZM10 4l-.001.002L10 4Z" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold">Confirmar eliminación</h3>
+              <p className="text-sm text-slate-500">Esta acción no se puede deshacer.</p>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div className="px-4 py-3 text-sm rounded-lg bg-slate-50">
+            <p className="text-slate-700">
+              Vas a eliminar <span className="font-semibold text-slate-900">{count}</span>{" "}
+              cupo{count === 1 ? "" : "s"} libre{count === 1 ? "" : "s"}.
+            </p>
+            <p className="mt-1 text-slate-500">
+              Se eliminarán los registros de la agenda con estado{" "}
+              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-700">SIN ASIGNAR</span>.
+            </p>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-2 mt-5">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 text-sm font-medium border rounded-xl text-slate-700 hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+            <button
+              ref={acceptRef}
+              type="button"
+              onClick={onAccept}
+              className="px-4 py-2 text-sm font-semibold text-white shadow rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 focus:outline-none focus:ring-2 focus:ring-red-400"
+            >
+              Eliminar definitivamente
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(content, document.body);
+}
+
 /* ============================ Página ============================ */
 
 export default function EliminarCuposPage() {
@@ -77,6 +183,8 @@ export default function EliminarCuposPage() {
     SIN_ASIGNAR: 0,
   });
   const [total, setTotal] = useState(0);
+
+  const confirmDlg = useConfirmDialog();
 
   const cuposLibres = useMemo(
     () => rows.filter((r) => estadoKey(r.estado) === "SIN_ASIGNAR" && r.cita_id != null),
@@ -183,7 +291,6 @@ export default function EliminarCuposPage() {
     const espCsv = espArr.join(",");
     const medCsv = medArr.join(",");
 
-    // 🔑 Enviamos TODAS las variantes para que el backend tome la que soporte.
     const payload: any = {
       desde,
       hasta,
@@ -261,11 +368,9 @@ export default function EliminarCuposPage() {
       return;
     }
 
-    const msg =
-      `Vas a eliminar ${selectedIds.length} cupo(s) libre(s).\n` +
-      `Esta acción no se puede deshacer.\n\n¿Confirmas?`;
-
-    if (!window.confirm(msg)) return;
+    // Modal elegante en lugar de window.confirm
+    const ok = await confirmDlg.ask();
+    if (!ok) return;
 
     try {
       const r = await fetch("/api/cupos/delete", {
@@ -314,6 +419,8 @@ export default function EliminarCuposPage() {
           <h1 className="text-2xl font-semibold">Eliminar cupos</h1>
 
           <div className="flex items-center gap-2">
+            {/* 🔹 Integración del menú de módulos */}
+            <ModulesMenu />
             <button
               onClick={handleEliminar}
               className="inline-flex items-center gap-2 px-4 py-2 text-white bg-red-600 rounded-xl hover:bg-red-700 disabled:opacity-60"
@@ -588,6 +695,14 @@ export default function EliminarCuposPage() {
           </div>
         </div>
       </div>
+
+      {/* Modal de confirmación */}
+      <ConfirmModal
+        open={confirmDlg.open}
+        count={selectedIds.length}
+        onCancel={confirmDlg.onCancel}
+        onAccept={confirmDlg.onAccept}
+      />
     </>
   );
 }
