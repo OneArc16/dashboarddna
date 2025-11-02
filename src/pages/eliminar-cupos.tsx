@@ -1,13 +1,12 @@
 // src/pages/eliminar-cupos.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Head from "next/head";
 import toast from "react-hot-toast";
+import MultiSelectRS, { type RSOption } from "@/components/MultiSelectRS";
 
 /* ============================ Tipos y helpers ============================ */
-
-type Option = { value: string; label: string };
 
 type Row = {
   cita_id: number | null;
@@ -18,8 +17,8 @@ type Row = {
   eps: string | null;
   idmedico: string | null;
   medico: string | null;
-  estado: string | null;   // variantes
-  tipo_cita: string | null;// CUPS
+  estado: string | null;
+  tipo_cita: string | null;
 };
 
 type StatKey = "ASIGNADA" | "ATENDIDA" | "CUMPLIDA" | "SIN_ASIGNAR";
@@ -44,211 +43,33 @@ const estadoKey = (s?: string | null): StatKey | null => {
   return null;
 };
 
-const dedupeOptions = (opts: Option[] = []): Option[] => {
-  const seen = new Set<string>();
-  const out: Option[] = [];
-  for (const o of opts) {
-    if (!o?.value) continue;
-    if (seen.has(o.value)) continue;
-    seen.add(o.value);
-    out.push(o);
-  }
-  return out;
-};
-
-/* ============================ Componente: MultiSelectDropdown ============================ */
-
-function MultiSelectDropdown({
-  options,
-  value,
-  onChange,
-  placeholder = "Selecciona...",
-  emptyText = "Sin resultados",
-  labelSearch = "Buscar...",
-  className = "",
-}: {
-  options: Option[];
-  value: string[];
-  onChange: (next: string[]) => void;
-  placeholder?: string;
-  emptyText?: string;
-  labelSearch?: string;
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const allRef = useRef<HTMLInputElement>(null);
-
-  const filtered = useMemo(() => {
-    const qq = q.trim().toUpperCase();
-    if (!qq) return options;
-    return options.filter(
-      (o) => o.label?.toUpperCase().includes(qq) || o.value?.toUpperCase().includes(qq)
-    );
-  }, [options, q]);
-
-  const allChecked =
-    filtered.length > 0 && filtered.every((o) => value.includes(o.value));
-
-  const someChecked =
-    filtered.some((o) => value.includes(o.value)) && !allChecked;
-
-  useEffect(() => {
-    if (allRef.current) {
-      (allRef.current as any).indeterminate = someChecked;
-    }
-  }, [someChecked]);
-
-  // Cerrar al hacer click fuera
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  const toggleOne = (val: string, checked: boolean) => {
-    const set = new Set(value);
-    if (checked) set.add(val);
-    else set.delete(val);
-    onChange(Array.from(set));
-  };
-
-  const toggleAll = (checked: boolean) => {
-    if (!filtered.length) return;
-    if (checked) {
-      const set = new Set(value);
-      for (const o of filtered) set.add(o.value);
-      onChange(Array.from(set));
-    } else {
-      const toRemove = new Set(filtered.map((o) => o.value));
-      onChange(value.filter((v) => !toRemove.has(v)));
-    }
-  };
-
-  const clear = () => onChange([]);
-
-  const summary =
-    value.length === 0
-      ? placeholder
-      : `${value.length} seleccionado${value.length === 1 ? "" : "s"}`;
-
-  return (
-    <div ref={wrapperRef} className={`relative ${className}`}>
-      {/* Botón que parece input */}
-      <button
-        type="button"
-        onClick={() => setOpen((s) => !s)}
-        className="flex items-center justify-between w-full px-3 py-2 mt-1 text-left bg-white border rounded-lg hover:bg-slate-50 h-[42px]"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        <span className={value.length === 0 ? "text-slate-500" : ""}>
-          {summary}
-        </span>
-        <span aria-hidden>▾</span>
-      </button>
-
-      {open && (
-        <div
-          className="absolute z-50 w-full mt-2 bg-white border shadow-xl rounded-xl"
-          role="listbox"
-        >
-          {/* Search */}
-          <div className="p-2 border-b">
-            <input
-              type="text"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder={labelSearch}
-              className="w-full px-3 py-2 border rounded-lg"
-              autoFocus
-            />
-            <label className="inline-flex items-center gap-2 mt-2 text-sm select-none">
-              <input
-                ref={allRef}
-                type="checkbox"
-                checked={allChecked}
-                onChange={(e) => toggleAll(e.target.checked)}
-                disabled={filtered.length === 0}
-              />
-              {allChecked ? "Desmarcar todos" : "Marcar todos"} ({filtered.length})
-            </label>
-          </div>
-
-          {/* Listado */}
-          <div className="p-1 overflow-auto max-h-64">
-            {filtered.length === 0 ? (
-              <div className="px-3 py-4 text-sm text-slate-500">Sin resultados</div>
-            ) : (
-              filtered.map((o) => {
-                const checked = value.includes(o.value);
-                return (
-                  <label
-                    key={o.value}
-                    className="flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer select-none hover:bg-slate-50"
-                    title={o.label}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => toggleOne(o.value, e.target.checked)}
-                    />
-                    <span className="truncate">{o.label}</span>
-                  </label>
-                );
-              })
-            )}
-          </div>
-
-          {/* Footer */}
-          <div className="flex items-center justify-between gap-2 p-2 border-t">
-            <button
-              onClick={clear}
-              className="px-3 py-1.5 text-sm border rounded-lg"
-              disabled={value.length === 0}
-            >
-              Limpiar
-            </button>
-            <button
-              onClick={() => setOpen(false)}
-              className="px-3 py-1.5 text-sm rounded-lg bg-black text-white"
-            >
-              Listo
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+const toValues = (arr: RSOption[]) => arr.map((o) => o.value);
 
 /* ============================ Página ============================ */
 
 export default function EliminarCuposPage() {
-  // Filtros
+  // Filtros base
   const [desde, setDesde] = useState<string>("");
   const [hasta, setHasta] = useState<string>("");
-  const [horaDesde, setHoraDesde] = useState<string>(""); // HH:MM
-  const [horaHasta, setHoraHasta] = useState<string>(""); // HH:MM
+  const [horaDesde, setHoraDesde] = useState<string>("");
+  const [horaHasta, setHoraHasta] = useState<string>("");
   const [eps, setEps] = useState<string>("");
-  const [especialidadesSel, setEspecialidadesSel] = useState<string[]>([]);
-  const [medicosSel, setMedicosSel] = useState<string[]>([]);
 
-  // Catálogos
-  const [epsOpts, setEpsOpts] = useState<Option[]>([]);
-  const [espOpts, setEspOpts] = useState<Option[]>([]);
-  const [medOpts, setMedOpts] = useState<Option[]>([]);
+  // Especialidades & Médicos
+  const [espOptions, setEspOptions] = useState<RSOption[]>([]);
+  const [espSel, setEspSel] = useState<RSOption[]>([]);
+  const [medOptions, setMedOptions] = useState<RSOption[]>([]);
+  const [medSel, setMedSel] = useState<RSOption[]>([]);
 
-  // Resultados y selección
+  // EPS
+  const [epsOpts, setEpsOpts] = useState<RSOption[]>([]);
+
+  // Resultados / selección
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
-  // Stats
+  // Estadísticas
   const [stats, setStats] = useState<Record<StatKey, number>>({
     ASIGNADA: 0,
     ATENDIDA: 0,
@@ -282,7 +103,9 @@ export default function EliminarCuposPage() {
     setTotal(data.length);
   }
 
-  useEffect(() => { recomputeStats(rows); }, [rows]);
+  useEffect(() => {
+    recomputeStats(rows);
+  }, [rows]);
 
   /* ============================ Cargar catálogos ============================ */
 
@@ -293,10 +116,12 @@ export default function EliminarCuposPage() {
           fetch("/api/catalog/eps"),
           fetch("/api/catalog/especialidades"),
         ]);
+
         const { options: epsOptions } = await rEps.json();
-        const { options: espOptions } = await rEsp.json();
-        setEpsOpts([{ value: "", label: "Todas" }, ...epsOptions]);
-        setEspOpts([{ value: "", label: "Todas" }, ...espOptions]);
+        const { options: espOptionsRaw } = await rEsp.json();
+
+        setEpsOpts([{ value: "", label: "Todas" }, ...(epsOptions as RSOption[])]);
+        setEspOptions((espOptionsRaw as RSOption[]).filter((o) => o.value));
       } catch (e) {
         console.error(e);
         toast.error("No fue posible cargar catálogos.");
@@ -304,131 +129,35 @@ export default function EliminarCuposPage() {
     })();
   }, []);
 
-  // ====== FILTRO DE MÉDICOS SEGÚN ESPECIALIDADES (ROBUSTO) ======
-  // Intenta múltiples formatos:
-  // 1) POST con JSON { especialidades: [...] }
-  // 2) GET con especialidad[] / especialidades[]
-  // 3) GET con repetidos ?especialidad=016&especialidad=022 (y plural)
-  // 4) GET con CSV ?especialidad=016,022 (y plural)
-  // Nunca cae a "todos" si hay especialidades seleccionadas.
-  const reqIdRef = useRef(0);
-
+  // Médicos dependientes de especialidades
   useEffect(() => {
     (async () => {
-      const myReqId = ++reqIdRef.current;
       try {
-        // Limpiar médicos seleccionados y opciones al cambiar especialidades
-        setMedicosSel([]);
-        setMedOpts([]);
+        setMedSel([]); // limpiar selección al cambiar especialidad
 
-        // Sin especialidades => traer todos los médicos
-        if (especialidadesSel.length === 0) {
-          const rAll = await fetch("/api/catalog/medicos");
-          const jAll = await rAll.json().catch(() => ({ options: [] as Option[] }));
-          if (reqIdRef.current !== myReqId) return;
-          setMedOpts(dedupeOptions(jAll.options || []));
+        if (espSel.length === 0) {
+          const r = await fetch("/api/catalog/medicos");
+          const { options } = await r.json().catch(() => ({ options: [] as RSOption[] }));
+          const opts = (options as RSOption[]) ?? [];
+          setMedOptions(opts);
+          setMedSel((prev) => prev.filter((p) => opts.some((o) => o.value === p.value)));
           return;
         }
 
-        const csv = especialidadesSel.join(",");
-
-        const attempts: Array<() => Promise<Option[]>> = [
-          // 1) POST con JSON
-          async () => {
-            const r = await fetch("/api/catalog/medicos", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ especialidades: especialidadesSel }),
-            });
-            if (!r.ok) throw new Error("POST no aceptado");
-            const j = await r.json();
-            return (j?.options ?? []) as Option[];
-          },
-          // 2) GET con especialidad[] / especialidades[]
-          async () => {
-            const qs = new URLSearchParams();
-            especialidadesSel.forEach((e) => qs.append("especialidad[]", e));
-            const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
-            if (!r.ok) throw new Error("GET [] especialidad no aceptado");
-            const j = await r.json();
-            return (j?.options ?? []) as Option[];
-          },
-          async () => {
-            const qs = new URLSearchParams();
-            especialidadesSel.forEach((e) => qs.append("especialidades[]", e));
-            const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
-            if (!r.ok) throw new Error("GET [] especialidades no aceptado");
-            const j = await r.json();
-            return (j?.options ?? []) as Option[];
-          },
-          // 3) GET repetidos singular/plural
-          async () => {
-            const qs = new URLSearchParams();
-            especialidadesSel.forEach((e) => qs.append("especialidad", e));
-            const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
-            if (!r.ok) throw new Error("GET repetido especialidad no aceptado");
-            const j = await r.json();
-            return (j?.options ?? []) as Option[];
-          },
-          async () => {
-            const qs = new URLSearchParams();
-            especialidadesSel.forEach((e) => qs.append("especialidades", e));
-            const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
-            if (!r.ok) throw new Error("GET repetido especialidades no aceptado");
-            const j = await r.json();
-            return (j?.options ?? []) as Option[];
-          },
-          // 4) GET CSV singular/plural
-          async () => {
-            const r = await fetch(`/api/catalog/medicos?especialidad=${encodeURIComponent(csv)}`);
-            if (!r.ok) throw new Error("GET CSV especialidad no aceptado");
-            const j = await r.json();
-            return (j?.options ?? []) as Option[];
-          },
-          async () => {
-            const r = await fetch(`/api/catalog/medicos?especialidades=${encodeURIComponent(csv)}`);
-            if (!r.ok) throw new Error("GET CSV especialidades no aceptado");
-            const j = await r.json();
-            return (j?.options ?? []) as Option[];
-          },
-        ];
-
-        let found: Option[] = [];
-        for (const attempt of attempts) {
-          try {
-            const opts = dedupeOptions(await attempt());
-            if (opts.length) {
-              found = opts;
-              break;
-            }
-          } catch {
-            // probar siguiente formato
-          }
-        }
-
-        if (reqIdRef.current !== myReqId) return;
-
-        if (found.length === 0) {
-          setMedOpts([]);
-          toast("No hay médicos para las especialidades seleccionadas.", { icon: "ℹ️" });
-          return;
-        }
-
-        setMedOpts(found);
-
-        // Purgar selección de médicos que ya no están en las opciones
-        setMedicosSel((prev) => {
-          const valid = new Set(found.map((o) => o.value));
-          return prev.filter((id) => valid.has(id));
-        });
+        // ?especialidad=016&especialidad=022
+        const qs = new URLSearchParams();
+        toValues(espSel).forEach((code) => qs.append("especialidad", code));
+        const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
+        const { options } = await r.json().catch(() => ({ options: [] as RSOption[] }));
+        const opts = (options as RSOption[]) ?? [];
+        setMedOptions(opts);
+        setMedSel((prev) => prev.filter((p) => opts.some((o) => o.value === p.value)));
       } catch (e) {
-        if (reqIdRef.current !== myReqId) return;
         console.error(e);
-        setMedOpts([]);
-        toast.error("No fue posible cargar médicos filtrados.");
+        setMedOptions([]);
       }
     })();
-  }, [especialidadesSel]);
+  }, [espSel]);
 
   /* ============================ Acciones ============================ */
 
@@ -449,68 +178,47 @@ export default function EliminarCuposPage() {
     setLoading(true);
     setSelectedIds([]);
 
-    const espCsv = especialidadesSel.join(",");
-    const medCsv = medicosSel.join(",");
+    const espArr = toValues(espSel);
+    const medArr = toValues(medSel);
+    const espCsv = espArr.join(",");
+    const medCsv = medArr.join(",");
 
-    // Construimos 3 variantes de payload para maximizar compatibilidad
-    const base = {
+    // 🔑 Enviamos TODAS las variantes para que el backend tome la que soporte.
+    const payload: any = {
       desde,
       hasta,
       horaDesde: horaDesde || undefined,
       horaHasta: horaHasta || undefined,
       eps: eps || undefined,
     };
-
-    const payloads: any[] = [
-      {
-        ...base,
-        especialidad: espCsv || undefined,
-        medicos: medicosSel.length ? medicosSel : undefined,
-        especialidades: especialidadesSel.length ? especialidadesSel : undefined,
-        especialidadesCsv: espCsv || undefined,
-      },
-      {
-        ...base,
-        especialidad: especialidadesSel.length ? especialidadesSel : undefined,
-        medicos: medicosSel.length ? medicosSel : undefined,
-        especialidadesCsv: espCsv || undefined,
-      },
-      {
-        ...base,
-        especialidad: espCsv || undefined,
-        medicos: medCsv || undefined,
-        especialidades: especialidadesSel.length ? especialidadesSel : undefined,
-        medicosCsv: medCsv || undefined,
-      },
-    ];
+    if (espArr.length) {
+      payload.especialidad = espArr;
+      payload.especialidades = espArr;
+      payload.especialidadCsv = espCsv;
+      payload.especialidadesCsv = espCsv;
+    }
+    if (medArr.length) {
+      payload.medicos = medArr;
+      payload.medicosCsv = medCsv;
+    }
 
     try {
-      let finalRows: Row[] = [];
-      for (let i = 0; i < payloads.length; i++) {
-        const r = await fetch("/api/cupos/list", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payloads[i]),
-        });
+      const r = await fetch("/api/cupos/list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-        if (!r.ok) {
-          if (i === payloads.length - 1) {
-            const j = await r.json().catch(() => ({}));
-            throw new Error(j?.error || "No se pudo obtener la lista de cupos.");
-          }
-          continue;
-        }
-
-        const data = (await r.json()) as { rows: Row[] };
-        finalRows = data?.rows || [];
-
-        if (finalRows.length > 0 || i === payloads.length - 1) {
-          setRows(finalRows);
-          recomputeStats(finalRows);
-          toast.success(`Se cargaron ${finalRows.length} registro(s)`);
-          break;
-        }
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error || "No se pudo obtener la lista de cupos.");
       }
+
+      const data = (await r.json()) as { rows: Row[] };
+      const finalRows = data?.rows || [];
+      setRows(finalRows);
+      recomputeStats(finalRows);
+      toast.success(`Se cargaron ${finalRows.length} registro(s)`);
     } catch (e: any) {
       console.error("Buscar error:", e);
       toast.error(e?.message ?? "Error al buscar.");
@@ -587,8 +295,8 @@ export default function EliminarCuposPage() {
 
   const resetFiltros = () => {
     setEps("");
-    setEspecialidadesSel([]);
-    setMedicosSel([]);
+    setEspSel([]);
+    setMedSel([]);
     setHoraDesde("");
     setHoraHasta("");
   };
@@ -622,7 +330,7 @@ export default function EliminarCuposPage() {
           <h2 className="mb-4 font-medium">Filtros</h2>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-            {/* Fila 1: Fechas, Horas, EPS */}
+            {/* Fechas/Horas/EPS */}
             <div className="col-span-6 md:col-span-2">
               <label className="text-sm text-slate-700">Desde</label>
               <input
@@ -668,7 +376,7 @@ export default function EliminarCuposPage() {
                 onChange={(e) => setEps(e.target.value)}
                 className="w-full px-3 py-2 mt-1 border rounded-lg h-[42px]"
               >
-                {[{ value: "", label: "Todas" }, ...epsOpts].map((o) => (
+                {epsOpts.map((o) => (
                   <option key={o.value || "all"} value={o.value}>
                     {o.label}
                   </option>
@@ -676,59 +384,47 @@ export default function EliminarCuposPage() {
               </select>
             </div>
 
-            {/* Fila 2: Especialidad y Médicos lado a lado */}
+            {/* Especialidad / Médicos */}
             <div className="col-span-12 md:col-span-6">
-              <label className="text-sm text-slate-700">Especialidad</label>
-              <MultiSelectDropdown
-                options={espOpts.filter((o) => o.value !== "")}
-                value={especialidadesSel}
-                onChange={setEspecialidadesSel}
-                placeholder="Selecciona especialidades..."
-                labelSearch="Buscar especialidad..."
-                className="w-full"
+              <MultiSelectRS
+                label="Especialidad"
+                placeholder="Selecciona especialidades…"
+                options={espOptions}
+                value={espSel}
+                onChange={setEspSel}
               />
               <div className="flex items-center gap-2 mt-2 text-sm">
                 <button
-                  onClick={() => setEspecialidadesSel([])}
+                  onClick={() => setEspSel([])}
                   className="px-3 py-1.5 border rounded-lg"
-                  disabled={especialidadesSel.length === 0}
+                  disabled={espSel.length === 0}
                   title="Limpiar selección"
                 >
-                  Limpiar selección ({especialidadesSel.length})
+                  Limpiar selección ({espSel.length})
                 </button>
-                <span className="text-slate-500">
-                  {especialidadesSel.length} seleccionada(s)
-                </span>
+                <span className="text-slate-500">{espSel.length} seleccionada(s)</span>
               </div>
             </div>
 
             <div className="col-span-12 md:col-span-6">
-              <label className="text-sm text-slate-700">Médicos</label>
-              <MultiSelectDropdown
-                options={medOpts}
-                value={medicosSel}
-                onChange={setMedicosSel}
-                placeholder="Selecciona médicos..."
-                labelSearch="Buscar médico..."
-                className="w-full"
+              <MultiSelectRS
+                label="Médicos"
+                placeholder="Selecciona médicos…"
+                options={medOptions}
+                value={medSel}
+                onChange={setMedSel}
               />
               <div className="flex items-center gap-2 mt-2 text-sm">
                 <button
-                  onClick={() => setMedicosSel([])}
+                  onClick={() => setMedSel([])}
                   className="px-3 py-1.5 border rounded-lg"
-                  disabled={medicosSel.length === 0}
+                  disabled={medSel.length === 0}
                   title="Limpiar selección"
                 >
-                  Limpiar selección ({medicosSel.length})
+                  Limpiar selección ({medSel.length})
                 </button>
-                <span className="text-slate-500">{medicosSel.length} seleccionado(s)</span>
+                <span className="text-slate-500">{medSel.length} seleccionado(s)</span>
               </div>
-              {/* Mensaje auxiliar para validar que está filtrando */}
-              {especialidadesSel.length > 0 && (
-                <div className="mt-1 text-xs text-slate-500">
-                  Mostrando {medOpts.length} médico(s) para {especialidadesSel.length} especialidad(es).
-                </div>
-              )}
             </div>
           </div>
 
@@ -747,12 +443,11 @@ export default function EliminarCuposPage() {
               Limpiar filtros
             </button>
 
-            {/* Selección masiva de cupos libres */}
             <button
               onClick={selectAllCuposLibres}
               disabled={cuposLibres.length === 0}
               className="px-4 py-2 border rounded-xl text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-              title="Selecciona todos los cupos que están SIN ASIGNAR en el resultado actual"
+              title="Selecciona todos los cupos SIN ASIGNAR del resultado"
             >
               Seleccionar todos los cupos libres
             </button>
@@ -775,15 +470,11 @@ export default function EliminarCuposPage() {
             </div>
           </div>
 
-          {/* Resumen por estado */}
           <div className="flex flex-wrap gap-2 mt-1 mb-3 text-sm">
             {STATUS_ORDER.map((k) => {
               const pct = total ? ((stats[k] / total) * 100).toFixed(1) : "0.0";
               return (
-                <div
-                  key={k}
-                  className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5"
-                >
+                <div key={k} className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5">
                   <span className={`inline-block size-2 rounded-full ${STATUS_META[k].dot}`} />
                   <span className="font-medium">{STATUS_META[k].label}:</span>
                   <span className="tabular-nums">{stats[k]}</span>
@@ -793,7 +484,6 @@ export default function EliminarCuposPage() {
             })}
           </div>
 
-          {/* Tabla */}
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
@@ -884,7 +574,6 @@ export default function EliminarCuposPage() {
             </table>
           </div>
 
-          {/* Footer acciones */}
           <div className="flex items-center justify-between mt-4">
             <div className="text-sm text-slate-600">
               {cuposLibres.length} cupo(s) libre(s) en el resultado actual.
