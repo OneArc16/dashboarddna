@@ -37,6 +37,8 @@ async function sendEmptyExcel(res: NextApiResponse, nombre: string) {
     { header: "ID Cita", key: "cita_id", width: 12 },
     { header: "Fecha", key: "fecha", width: 12 },
     { header: "Hora", key: "hora", width: 10 },
+    { header: "Tipo Doc", key: "doc_tipo", width: 12 },     // nuevo
+    { header: "N° Documento", key: "doc_numero", width: 18 }, // nuevo
     { header: "Paciente", key: "paciente", width: 35 },
     { header: "EPS", key: "eps", width: 12 },
     { header: "ID Médico", key: "idmedico", width: 14 },
@@ -53,6 +55,15 @@ async function sendEmptyExcel(res: NextApiResponse, nombre: string) {
   );
   res.setHeader("Content-Disposition", `attachment; filename="${nombre}.xlsx"`);
   res.status(200).send(Buffer.from(buf));
+}
+
+// Cupo libre => ocultar documento
+function isCupoLibre(estado?: string | null) {
+  const v = (estado ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toUpperCase();
+  return v.startsWith("SIN ASIGNAR");
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -127,6 +138,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       cita_id: number | null;
       fecha: string;
       hora: string | null;
+      doc_tipo: string | null;
+      doc_numero: string | null;
       paciente: string | null;
       eps: string | null;
       idmedico: string | null;
@@ -157,7 +170,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!batch.length) break;
       skip += BATCH;
 
-      // Hydrate usuarios (para EPS y nombre)
+      // Hydrate usuarios (para EPS, nombre y documento)
       const userIds = Array.from(
         new Set(
           batch
@@ -170,6 +183,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             where: { IdUsuario: { in: userIds } },
             select: {
               IdUsuario: true,
+              Identificaci_n_usuario: true, // número
+              Tipo_identificaci_n: true,    // tipo
               Primer_nombre: true,
               Segundo_nombre: true,
               Primer_apellido: true,
@@ -201,10 +216,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         const d = a.idmedico ? mDocs.get(a.idmedico) : undefined;
 
+        const doc_tipo = (u?.Tipo_identificaci_n ?? null) as string | null;
+        const doc_numero = isCupoLibre(a.Estado)
+          ? null
+          : ((u?.Identificaci_n_usuario ?? a.idusuario ?? null) as string | null);
+
         rowsOut.push({
           cita_id: a.idagenda ?? null,
           fecha: fmtFecha(a.fecha_cita),
           hora: fmtHoraFromIdHora(a.idhora),
+          doc_tipo,
+          doc_numero,
           paciente: buildNombre(u) || null,
           eps: u?.Codigo_eps ?? null,
           idmedico: a.idmedico ?? null,
@@ -225,6 +247,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       { header: "ID Cita", key: "cita_id", width: 12 },
       { header: "Fecha", key: "fecha", width: 12 },
       { header: "Hora", key: "hora", width: 10 },
+      { header: "Tipo Doc", key: "doc_tipo", width: 12 },      // nuevo
+      { header: "N° Documento", key: "doc_numero", width: 18 }, // nuevo
       { header: "Paciente", key: "paciente", width: 35 },
       { header: "EPS", key: "eps", width: 12 },
       { header: "ID Médico", key: "idmedico", width: 14 },

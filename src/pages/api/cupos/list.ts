@@ -54,6 +54,13 @@ function buildNombre(u: {
     .join(" ");
 }
 
+type PacienteInfo = {
+  nombre: string | null;
+  doc_tipo: string | null;
+  doc_numero: string | null;
+  eps: string | null;
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     if (req.method !== "POST") return res.status(405).end("Method Not Allowed");
@@ -135,7 +142,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       take: 5000,
     });
 
-    // ===== Enriquecer con PACIENTE
+    // ===== Enriquecer con PACIENTE (nombre + tipo y número de documento + EPS)
     const rawUserKeys = uniq(
       agendas.map((a) => (a.idusuario || "").trim()).filter(Boolean)
     );
@@ -146,6 +153,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let usuarios: Array<{
       IdUsuario: number;
       Identificaci_n_usuario: string;
+      Tipo_identificaci_n: string;
+      Codigo_eps: string;
       Primer_nombre: string | null;
       Segundo_nombre: string | null;
       Primer_apellido: string | null;
@@ -165,6 +174,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         select: {
           IdUsuario: true,
           Identificaci_n_usuario: true,
+          Tipo_identificaci_n: true,
+          Codigo_eps: true,
           Primer_nombre: true,
           Segundo_nombre: true,
           Primer_apellido: true,
@@ -173,13 +184,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    const nombrePorDoc: Record<string, string> = {};
-    const nombrePorId: Record<number, string> = {};
+    const pacientePorDoc: Record<string, PacienteInfo> = {};
+    const pacientePorId: Record<number, PacienteInfo> = {};
+
     for (const u of usuarios) {
-      const nom = buildNombre(u);
-      if (u.Identificaci_n_usuario)
-        nombrePorDoc[u.Identificaci_n_usuario] = nom;
-      if (typeof u.IdUsuario === "number") nombrePorId[u.IdUsuario] = nom;
+      const info: PacienteInfo = {
+        nombre: buildNombre(u),
+        doc_tipo: u.Tipo_identificaci_n ?? null,
+        doc_numero: u.Identificaci_n_usuario ?? null,
+        eps: u.Codigo_eps ?? null,
+      };
+
+      if (u.Identificaci_n_usuario) {
+        pacientePorDoc[u.Identificaci_n_usuario] = info;
+      }
+      if (typeof u.IdUsuario === "number") {
+        pacientePorId[u.IdUsuario] = info;
+      }
     }
 
     // ===== Enriquecer con NOMBRE DEL MÉDICO
@@ -202,20 +223,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // ===== Respuesta
     const rows = agendas.map((a) => {
       const idu = (a.idusuario || "").trim();
-      let paciente: string | null = null;
+
+      let info: PacienteInfo | undefined;
       if (idu) {
-        paciente =
-          nombrePorDoc[idu] ??
-          (/^\d+$/.test(idu) ? nombrePorId[Number(idu)] : undefined) ??
-          null;
+        info =
+          pacientePorDoc[idu] ??
+          (/^\d+$/.test(idu) ? pacientePorId[Number(idu)] : undefined);
       }
+
       return {
         cita_id: a.idagenda,
         fecha: a.fecha_cita.toISOString().slice(0, 10),
         hora: a.idhora,
-        idusuario: idu || null, // <- string en el front
-        paciente,
-        eps: a.Entidad ?? null,
+        // idusuario crudo
+        idusuario: idu || null,
+        // datos de paciente
+        paciente: info?.nombre ?? null,
+        doc_tipo: info?.doc_tipo ?? null,
+        doc_numero: info?.doc_numero ?? null,
+        // EPS primero la del paciente, si no, la de la agenda
+        eps: info?.eps ?? a.Entidad ?? null,
+        // resto de campos
         idmedico: a.idmedico,
         medico: a.idmedico ? medicoPorCodigo[a.idmedico] ?? null : null,
         estado: a.Estado ?? null,

@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "react-hot-toast";
 import Head from "next/head";
-import MultiSelectRS from "@/components/MultiSelectRS"; // componente basado en react-select
+import MultiSelectRS from "@/components/MultiSelectRS";
 import ModulesMenu from "@/components/ModulesMenu";
 
 /* ============================ Tipos y helpers ============================ */
@@ -15,6 +15,10 @@ type Row = {
   cita_id: number | null;
   fecha: string;
   hora: string | null;
+  // NUEVO:
+  doc_tipo: string | null;
+  doc_numero: string | null;
+  // ------
   idusuario: number | null;
   paciente: string | null;
   eps: string | null;
@@ -46,57 +50,36 @@ const estadoKey = (s?: string | null): StatKey | null => {
   return null;
 };
 
-// Badges de estado (añadido)
 const BADGE_META: Record<StatKey, { label: string; cls: string }> = {
-  ASIGNADA: {
-    label: "Asignada",
-    cls: "bg-amber-100 text-amber-900 border border-amber-200",
-  },
-  ATENDIDA: {
-    label: "Atendido",
-    cls: "bg-emerald-100 text-emerald-900 border border-emerald-200",
-  },
-  CUMPLIDA: {
-    label: "Activada",
-    cls: "bg-indigo-100 text-indigo-900 border border-indigo-200",
-  },
-  SIN_ASIGNAR: {
-    label: "Sin asignar",
-    cls: "bg-zinc-100 text-zinc-800 border border-zinc-200",
-  },
+  ASIGNADA: { label: "Asignada", cls: "bg-amber-100 text-amber-900 border border-amber-200" },
+  ATENDIDA: { label: "Atendido", cls: "bg-emerald-100 text-emerald-900 border border-emerald-200" },
+  CUMPLIDA: { label: "Activada", cls: "bg-indigo-100 text-indigo-900 border border-indigo-200" },
+  SIN_ASIGNAR: { label: "Sin asignar", cls: "bg-zinc-100 text-zinc-800 border border-zinc-200" },
 };
 
 function EstadoBadge({ estado }: { estado: string | null }) {
   const k = estadoKey(estado);
   if (!k) return <span>{estado ?? ""}</span>;
   const meta = BADGE_META[k];
-  return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium inline-block ${meta.cls}`}>
-      {meta.label}
-    </span>
-  );
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium inline-block ${meta.cls}`}>{meta.label}</span>;
 }
 
-// Debe coincidir con el tope del backend (MAX_LIMIT)
 const ALL_LIMIT = 1_000_000;
 type LimitValue = number | "ALL";
 
 /* ============================ Página ============================ */
 
 export default function ReportesPage() {
-  // Filtros
   const [desde, setDesde] = useState<string>("");
   const [hasta, setHasta] = useState<string>("");
   const [eps, setEps] = useState<string>("");
 
-  // (estados legacy, se mantienen por compatibilidad)
+  // legacy (no tocar)
   const [especialidad, setEspecialidad] = useState<string>("");
   const [medico, setMedico] = useState<string>("");
 
-  // Multi-select (nuevo)
   const [espSel, setEspSel] = useState<Option[]>([]);
   const [medSel, setMedSel] = useState<Option[]>([]);
-
   const [limit, setLimit] = useState<LimitValue>(1000);
 
   const [checkAsignada, setCheckAsignada] = useState(true);
@@ -113,16 +96,13 @@ export default function ReportesPage() {
     return arr;
   }, [checkAsignada, checkAtendida, checkCumplida, checkSinAsignar]);
 
-  // Catálogos
   const [epsOpts, setEpsOpts] = useState<Option[]>([]);
   const [espOpts, setEspOpts] = useState<Option[]>([]);
   const [medOpts, setMedOpts] = useState<Option[]>([]);
 
-  // Resultados
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Stats
   const [stats, setStats] = useState<Record<StatKey, number>>({
     ASIGNADA: 0,
     ATENDIDA: 0,
@@ -132,41 +112,27 @@ export default function ReportesPage() {
   const [total, setTotal] = useState(0);
 
   function recomputeStats(data: Row[]) {
-    const next: Record<StatKey, number> = {
-      ASIGNADA: 0,
-      ATENDIDA: 0,
-      CUMPLIDA: 0,
-      SIN_ASIGNAR: 0,
-    };
+    const next: Record<StatKey, number> = { ASIGNADA: 0, ATENDIDA: 0, CUMPLIDA: 0, SIN_ASIGNAR: 0 };
     for (const r of data) {
       const k = estadoKey(r.estado);
       if (k) next[k]++;
     }
     setStats(next);
     setTotal(data.length);
-    return next; // útil para toasts inmediatos
+    return next;
   }
 
   useEffect(() => {
     recomputeStats(rows);
   }, [rows]);
 
-  /* ============================ Cargar catálogos ============================ */
-
   useEffect(() => {
     (async () => {
       try {
-        const [rEps, rEsp] = await Promise.all([
-          fetch("/api/catalog/eps"),
-          fetch("/api/catalog/especialidades"),
-        ]);
+        const [rEps, rEsp] = await Promise.all([fetch("/api/catalog/eps"), fetch("/api/catalog/especialidades")]);
         const { options: epsOptions } = await rEps.json();
         const { options: espOptions } = await rEsp.json();
-
-        // EPS mantiene "Todas"
         setEpsOpts([{ value: "", label: "Todas" }, ...epsOptions]);
-
-        // MultiSelect no necesita "Todas"
         setEspOpts(espOptions);
       } catch (e) {
         console.error(e);
@@ -175,20 +141,15 @@ export default function ReportesPage() {
     })();
   }, []);
 
-  // Cargar MÉDICOS según las especialidades seleccionadas
   useEffect(() => {
     (async () => {
       try {
         const qs = new URLSearchParams();
-        // API soporta ?especialidades=016&especialidades=036
         espSel.forEach((es) => qs.append("especialidades", es.value));
-
         const url = "/api/catalog/medicos" + (qs.toString() ? `?${qs.toString()}` : "");
         const r = await fetch(url);
         const { options } = await r.json();
-
         setMedOpts(options || []);
-        // si alguno seleccionado ya no está, se limpia
         setMedSel((prev) => prev.filter((m) => (options || []).some((o: Option) => o.value === m.value)));
       } catch (e) {
         console.error(e);
@@ -198,27 +159,18 @@ export default function ReportesPage() {
     })();
   }, [espSel]);
 
-  /* ============================ Acciones ============================ */
-
   const handleBuscar = async () => {
-    if (!desde || !hasta) {
-      toast.error("Selecciona el rango de fechas.");
-      return;
-    }
-    if (new Date(desde) > new Date(hasta)) {
-      toast.error("La fecha 'Desde' no puede ser mayor a 'Hasta'.");
-      return;
-    }
+    if (!desde || !hasta) return toast.error("Selecciona el rango de fechas.");
+    if (new Date(desde) > new Date(hasta)) return toast.error("La fecha 'Desde' no puede ser mayor a 'Hasta'.");
 
     setLoading(true);
     try {
       const limitToSend = limit === "ALL" ? ALL_LIMIT : Number(limit);
-
       const body = {
         desde,
         hasta,
         eps: eps || undefined,
-        especialidades: espSel.map((o) => o.value), // arrays
+        especialidades: espSel.map((o) => o.value),
         medicos: medSel.map((o) => o.value),
         estados: estadosSeleccionados,
         limit: limitToSend,
@@ -230,12 +182,10 @@ export default function ReportesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
         throw new Error(j?.error || "No se pudo obtener el reporte.");
       }
-
       const data = (await r.json()) as { rows: Row[] };
       setRows(data.rows);
       const localStats = recomputeStats(data.rows);
@@ -252,10 +202,7 @@ export default function ReportesPage() {
   };
 
   const handleExport = () => {
-    if (!desde || !hasta) {
-      toast.error("Selecciona el rango de fechas.");
-      return;
-    }
+    if (!desde || !hasta) return toast.error("Selecciona el rango de fechas.");
     const q = new URLSearchParams();
     q.set("desde", desde);
     q.set("hasta", hasta);
@@ -263,14 +210,13 @@ export default function ReportesPage() {
     if (eps) q.set("eps", eps);
     espSel.forEach((o) => q.append("especialidades", o.value));
     medSel.forEach((o) => q.append("medicos", o.value));
-
     window.open(`/api/reportes/export?${q.toString()}`, "_blank");
   };
 
   const resetFiltros = () => {
     setEps("");
-    setEspecialidad(""); // legacy
-    setMedico("");       // legacy
+    setEspecialidad("");
+    setMedico("");
     setEspSel([]);
     setMedSel([]);
     setCheckAsignada(true);
@@ -280,206 +226,102 @@ export default function ReportesPage() {
     setLimit(1000);
   };
 
-  /* ============================ UI ============================ */
-
   return (
     <>
-      <Head>
-        <title>Reportes DNAPLUS</title>
-      </Head>
+      <Head><title>Reportes DNAPLUS</title></Head>
 
-      <div className="px-4 py-6 mx-auto max-w-7xl">
+      <div className="px-4 py-6 mx-auto max-w-[1400px]">
         <div className="flex items-center justify-between mb-5">
           <h1 className="text-2xl font-semibold">Reportes DNAPLUS</h1>
           <div className="flex items-center gap-2">
             <ModulesMenu />
-            <button
-              onClick={handleExport}
-              className="inline-flex items-center gap-2 px-4 py-2 text-white bg-black rounded-xl hover:opacity-90"
-              title="Descargar Excel"
-            >
+            <button onClick={handleExport} className="inline-flex items-center gap-2 px-4 py-2 text-white bg-black rounded-xl hover:opacity-90" title="Descargar Excel">
               <span>📥</span> Descargar
             </button>
           </div>
         </div>
 
-        {/* --------- Filtros --------- */}
+        {/* Filtros */}
         <div className="p-4 border rounded-2xl">
           <h2 className="mb-4 font-medium">Filtros</h2>
-
-          {/* Grid 12 columnas para alinear mejor */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-            {/* Fechas */}
             <div className="md:col-span-3">
               <label className="text-sm text-slate-700">Desde</label>
-              <input
-                type="date"
-                value={desde}
-                onChange={(e) => setDesde(e.target.value)}
-                className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg"
-              />
+              <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg" />
             </div>
             <div className="md:col-span-3">
               <label className="text-sm text-slate-700">Hasta</label>
-              <input
-                type="date"
-                value={hasta}
-                onChange={(e) => setHasta(e.target.value)}
-                className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg"
-              />
+              <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg" />
             </div>
 
-            {/* EPS */}
             <div className="md:col-span-3">
               <label className="text-sm text-slate-700">EPS</label>
-              <select
-                value={eps}
-                onChange={(e) => setEps(e.target.value)}
-                className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg"
-              >
+              <select value={eps} onChange={(e) => setEps(e.target.value)} className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg">
                 {epsOpts.map((o) => (
-                  <option key={o.value || "all"} value={o.value}>
-                    {o.label}
-                  </option>
+                  <option key={o.value || "all"} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
 
-            {/* Registros por página */}
             <div className="md:col-span-3">
               <label className="text-sm text-slate-700">Registros por página</label>
               <select
                 value={limit === "ALL" ? "ALL" : String(limit)}
-                onChange={(e) =>
-                  setLimit(e.target.value === "ALL" ? "ALL" : Number(e.target.value))
-                }
+                onChange={(e) => setLimit(e.target.value === "ALL" ? "ALL" : Number(e.target.value))}
                 className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg"
               >
-                {[100, 500, 1000, 5000].map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
+                {[100, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n}</option>)}
                 <option value="ALL">Todos</option>
               </select>
             </div>
 
-            {/* Especialidad (MultiSelect) */}
             <div className="md:col-span-6">
-              <MultiSelectRS
-                label="Especialidad"
-                options={espOpts}
-                value={espSel}
-                onChange={setEspSel}
-              />
+              <MultiSelectRS label="Especialidad" options={espOpts} value={espSel} onChange={setEspSel} />
               <div className="flex items-center gap-3 mt-1 text-xs text-slate-600">
-                <button
-                  type="button"
-                  onClick={() => setEspSel([])}
-                  className="px-2 py-1 border rounded"
-                >
-                  Limpiar selección ({espSel.length})
-                </button>
+                <button type="button" onClick={() => setEspSel([])} className="px-2 py-1 border rounded">Limpiar selección ({espSel.length})</button>
                 <span>{espSel.length} seleccionada(s)</span>
               </div>
             </div>
 
-            {/* Médico (MultiSelect) */}
             <div className="md:col-span-6">
-              <MultiSelectRS
-                label="Médico"
-                options={medOpts}
-                value={medSel}
-                onChange={setMedSel}
-              />
+              <MultiSelectRS label="Médico" options={medOpts} value={medSel} onChange={setMedSel} />
               <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-slate-600">
-                <button
-                  type="button"
-                  onClick={() => setMedSel([])}
-                  className="px-2 py-1 border rounded"
-                >
-                  Limpiar selección ({medSel.length})
-                </button>
+                <button type="button" onClick={() => setMedSel([])} className="px-2 py-1 border rounded">Limpiar selección ({medSel.length})</button>
                 <span>{medSel.length} seleccionado(s)</span>
-                <span className="text-slate-500">
-                  Mostrando {medOpts.length} médico(s) para {espSel.length || "todas"} especialidad(es).
-                </span>
+                <span className="text-slate-500">Mostrando {medOpts.length} médico(s) para {espSel.length || "todas"} especialidad(es).</span>
               </div>
             </div>
 
-            {/* Estados */}
             <div className="md:col-span-12">
               <div className="grid grid-cols-2 gap-2 mt-1 md:grid-cols-4">
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checkAsignada}
-                    onChange={(e) => setCheckAsignada(e.target.checked)}
-                  />
-                  Asignadas
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checkAtendida}
-                    onChange={(e) => setCheckAtendida(e.target.checked)}
-                  />
-                  Atendidas
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checkCumplida}
-                    onChange={(e) => setCheckCumplida(e.target.checked)}
-                  />
-                  Activadas
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checkSinAsignar}
-                    onChange={(e) => setCheckSinAsignar(e.target.checked)}
-                  />
-                  Sin asignar
-                </label>
+                <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={checkAsignada} onChange={(e) => setCheckAsignada(e.target.checked)} /> Asignadas</label>
+                <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={checkAtendida} onChange={(e) => setCheckAtendida(e.target.checked)} /> Atendidas</label>
+                <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={checkCumplida} onChange={(e) => setCheckCumplida(e.target.checked)} /> Activadas</label>
+                <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={checkSinAsignar} onChange={(e) => setCheckSinAsignar(e.target.checked)} /> Sin asignar</label>
               </div>
             </div>
 
-            {/* Botones */}
             <div className="flex items-center gap-3 mt-2 md:col-span-12">
-              <button
-                onClick={handleBuscar}
-                disabled={loading}
-                className="px-4 py-2 text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-60"
-              >
+              <button onClick={handleBuscar} disabled={loading} className="px-4 py-2 text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-60">
                 {loading ? "Buscando..." : "Buscar"}
               </button>
-              <button
-                onClick={resetFiltros}
-                className="px-4 py-2 border rounded-xl text-slate-700 hover:bg-slate-50"
-              >
-                Limpiar filtros
-              </button>
+              <button onClick={resetFiltros} className="px-4 py-2 border rounded-xl text-slate-700 hover:bg-slate-50">Limpiar filtros</button>
             </div>
           </div>
         </div>
 
-        {/* --------- Resultados --------- */}
+        {/* Resultados */}
         <div className="p-4 mt-6 border rounded-2xl">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-medium">Resultados ({total})</h3>
             <div className="text-sm text-slate-500">Mostrando {rows.length} registro(s)</div>
           </div>
 
-          {/* Resumen por estado */}
           <div className="flex flex-wrap gap-2 mt-1 mb-3 text-sm">
             {STATUS_ORDER.map((k) => {
               const pct = total ? ((stats[k] / total) * 100).toFixed(1) : "0.0";
               return (
-                <div
-                  key={k}
-                  className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5"
-                >
+                <div key={k} className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5">
                   <span className={`inline-block size-2 rounded-full ${STATUS_META[k].dot}`} />
                   <span className="font-medium">{STATUS_META[k].label}:</span>
                   <span className="tabular-nums">{stats[k]}</span>
@@ -489,7 +331,6 @@ export default function ReportesPage() {
             })}
           </div>
 
-          {/* Tabla */}
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
@@ -498,6 +339,8 @@ export default function ReportesPage() {
                     "ID Cita",
                     "Fecha",
                     "Hora",
+                    "Tipo Doc",       // NUEVO
+                    "N° Documento",   // NUEVO
                     "Paciente",
                     "EPS",
                     "ID Médico",
@@ -505,33 +348,29 @@ export default function ReportesPage() {
                     "Estado",
                     "Tipo Cita (CUPS)",
                   ].map((h) => (
-                    <th key={h} className="px-3 py-2 font-semibold">
-                      {h}
-                    </th>
+                    <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td className="px-3 py-6 text-center text-slate-500" colSpan={9}>
-                      Sin resultados
-                    </td>
+                    <td className="px-3 py-6 text-center text-slate-500 whitespace-nowrap" colSpan={11}>Sin resultados</td>
                   </tr>
                 )}
                 {rows.map((r, i) => (
                   <tr key={`${r.cita_id ?? i}-${i}`} className="border-b">
-                    <td className="px-3 py-2 tabular-nums">{r.cita_id ?? ""}</td>
-                    <td className="px-3 py-2">{r.fecha}</td>
-                    <td className="px-3 py-2">{r.hora ?? ""}</td>
-                    <td className="px-3 py-2">{r.paciente ?? ""}</td>
-                    <td className="px-3 py-2">{r.eps ?? ""}</td>
-                    <td className="px-3 py-2">{r.idmedico ?? ""}</td>
-                    <td className="px-3 py-2">{r.medico ?? ""}</td>
-                    <td className="px-3 py-2">
-                      <EstadoBadge estado={r.estado} />
-                    </td>
-                    <td className="px-3 py-2">{r.tipo_cita ?? ""}</td>
+                    <td className="px-3 py-2 tabular-nums whitespace-nowrap">{r.cita_id ?? ""}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{r.fecha}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{r.hora ?? ""}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{r.doc_tipo ?? ""}</td>     {/* NUEVO */}
+                    <td className="px-3 py-2 whitespace-nowrap">{r.doc_numero ?? ""}</td>   {/* NUEVO */}
+                    <td className="px-3 py-2 whitespace-nowrap">{r.paciente ?? ""}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{r.eps ?? ""}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{r.idmedico ?? ""}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{r.medico ?? ""}</td>
+                    <td className="px-3 py-2 whitespace-nowrap"><EstadoBadge estado={r.estado} /></td>
+                    <td className="px-3 py-2 whitespace-nowrap">{r.tipo_cita ?? ""}</td>
                   </tr>
                 ))}
               </tbody>

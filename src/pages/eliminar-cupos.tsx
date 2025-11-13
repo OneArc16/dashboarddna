@@ -14,6 +14,11 @@ type Row = {
   cita_id: number | null;
   fecha: string;           // 'YYYY-MM-DD'
   hora: string | null;     // 'HH:MM'
+
+  // Documento
+  doc_tipo: string | null;
+  doc_numero: string | null;
+
   idusuario: number | null;
   paciente: string | null;
   eps: string | null;
@@ -31,6 +36,7 @@ const STATUS_META: Record<StatKey, { label: string; dot: string }> = {
   CUMPLIDA: { label: "Activadas", dot: "bg-indigo-500" },
   SIN_ASIGNAR: { label: "Cupos libres", dot: "bg-zinc-400" },
 };
+
 const STATUS_ORDER: StatKey[] = ["ASIGNADA", "ATENDIDA", "CUMPLIDA", "SIN_ASIGNAR"];
 
 const normalize = (s?: string | null) =>
@@ -52,19 +58,23 @@ const toValues = (arr: RSOption[]) => arr.map((o) => o.value);
 function useConfirmDialog() {
   const [open, setOpen] = useState(false);
   const resolverRef = useRef<((v: boolean) => void) | null>(null);
+
   const ask = () =>
     new Promise<boolean>((resolve) => {
       resolverRef.current = resolve;
       setOpen(true);
     });
+
   const onCancel = () => {
     setOpen(false);
     resolverRef.current?.(false);
   };
+
   const onAccept = () => {
     setOpen(false);
     resolverRef.current?.(true);
   };
+
   return { open, ask, onCancel, onAccept, setOpen };
 }
 
@@ -94,34 +104,52 @@ function ConfirmModal({
   if (!open) return null;
 
   const content = (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center" aria-modal="true" role="dialog">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center"
+      aria-modal="true"
+      role="dialog"
+    >
       {/* Overlay */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onCancel} />
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={onCancel}
+      />
+
       {/* Card */}
       <div className="relative w-full max-w-md mx-4 bg-white shadow-2xl rounded-2xl ring-1 ring-black/10">
         <div className="px-6 pt-6 pb-5">
           {/* Header */}
           <div className="flex items-center gap-3 mb-4">
             <div className="flex items-center justify-center rounded-full size-10 bg-red-50 ring-1 ring-red-100">
-              <svg viewBox="0 0 24 24" className="w-5 h-5 text-red-600" fill="currentColor">
+              <svg
+                viewBox="0 0 24 24"
+                className="w-5 h-5 text-red-600"
+                fill="currentColor"
+              >
                 <path d="M9 3h6a1 1 0 0 1 .993.883L16 4h3a1 1 0 1 1 0 2h-1.05l-1.2 12.01A3 3 0 0 1 13.76 21H10.24a3 3 0 0 1-2.94-2.99L6.1 6H5a1 1 0 1 1 0-2h3l.007-.117A1 1 0 0 1 9 3Zm6.95 3H8.05l1.18 11.81a1 1 0 0 0 .99.9h3.54a1 1 0 0 0 .99-.9L15.95 6ZM9 8a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1Zm6 0a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1ZM10 4l-.001.002L10 4Z" />
               </svg>
             </div>
             <div>
               <h3 className="text-lg font-semibold">Confirmar eliminación</h3>
-              <p className="text-sm text-slate-500">Esta acción no se puede deshacer.</p>
+              <p className="text-sm text-slate-500">
+                Esta acción no se puede deshacer.
+              </p>
             </div>
           </div>
 
           {/* Body */}
           <div className="px-4 py-3 text-sm rounded-lg bg-slate-50">
             <p className="text-slate-700">
-              Vas a eliminar <span className="font-semibold text-slate-900">{count}</span>{" "}
+              Vas a eliminar{" "}
+              <span className="font-semibold text-slate-900">{count}</span>{" "}
               cupo{count === 1 ? "" : "s"} libre{count === 1 ? "" : "s"}.
             </p>
             <p className="mt-1 text-slate-500">
               Se eliminarán los registros de la agenda con estado{" "}
-              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-700">SIN ASIGNAR</span>.
+              <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-700">
+                SIN ASIGNAR
+              </span>
+              .
             </p>
           </div>
 
@@ -192,9 +220,13 @@ export default function EliminarCuposPage() {
   );
 
   const selectedCount = selectedIds.length;
-  const allSelectableIds = useMemo(() => cuposLibres.map((r) => r.cita_id!), [cuposLibres]);
+  const allSelectableIds = useMemo(
+    () => cuposLibres.map((r) => r.cita_id!),
+    [cuposLibres]
+  );
   const allSelected =
-    allSelectableIds.length > 0 && allSelectableIds.every((id) => selectedIds.includes(id));
+    allSelectableIds.length > 0 &&
+    allSelectableIds.every((id) => selectedIds.includes(id));
 
   function recomputeStats(data: Row[]) {
     const next: Record<StatKey, number> = {
@@ -245,10 +277,14 @@ export default function EliminarCuposPage() {
 
         if (espSel.length === 0) {
           const r = await fetch("/api/catalog/medicos");
-          const { options } = await r.json().catch(() => ({ options: [] as RSOption[] }));
+          const { options } = await r.json().catch(() => ({
+            options: [] as RSOption[],
+          }));
           const opts = (options as RSOption[]) ?? [];
           setMedOptions(opts);
-          setMedSel((prev) => prev.filter((p) => opts.some((o) => o.value === p.value)));
+          setMedSel((prev) =>
+            prev.filter((p) => opts.some((o) => o.value === p.value))
+          );
           return;
         }
 
@@ -256,10 +292,14 @@ export default function EliminarCuposPage() {
         const qs = new URLSearchParams();
         toValues(espSel).forEach((code) => qs.append("especialidad", code));
         const r = await fetch(`/api/catalog/medicos?${qs.toString()}`);
-        const { options } = await r.json().catch(() => ({ options: [] as RSOption[] }));
+        const { options } = await r.json().catch(() => ({
+          options: [] as RSOption[],
+        }));
         const opts = (options as RSOption[]) ?? [];
         setMedOptions(opts);
-        setMedSel((prev) => prev.filter((p) => opts.some((o) => o.value === p.value)));
+        setMedSel((prev) =>
+          prev.filter((p) => opts.some((o) => o.value === p.value))
+        );
       } catch (e) {
         console.error(e);
         setMedOptions([]);
@@ -368,7 +408,6 @@ export default function EliminarCuposPage() {
       return;
     }
 
-    // Modal elegante en lugar de window.confirm
     const ok = await confirmDlg.ask();
     if (!ok) return;
 
@@ -388,7 +427,9 @@ export default function EliminarCuposPage() {
       toast.success(`Eliminados ${deleted} cupo(s).`);
 
       const removed = new Set(selectedIds);
-      const nextRows = rows.filter((r) => !(r.cita_id && removed.has(r.cita_id)));
+      const nextRows = rows.filter(
+        (r) => !(r.cita_id && removed.has(r.cita_id))
+      );
       setRows(nextRows);
       setSelectedIds([]);
       recomputeStats(nextRows);
@@ -414,12 +455,11 @@ export default function EliminarCuposPage() {
         <title>Eliminar Cupos DNAPLUS</title>
       </Head>
 
-      <div className="px-4 py-6 mx-auto max-w-7xl">
+      <div className="px-4 py-6 mx-auto max-w-[1400px]">
         <div className="flex items-center justify-between mb-5">
           <h1 className="text-2xl font-semibold">Eliminar cupos</h1>
 
           <div className="flex items-center gap-2">
-            {/* 🔹 Integración del menú de módulos */}
             <ModulesMenu />
             <button
               onClick={handleEliminar}
@@ -509,7 +549,9 @@ export default function EliminarCuposPage() {
                 >
                   Limpiar selección ({espSel.length})
                 </button>
-                <span className="text-slate-500">{espSel.length} seleccionada(s)</span>
+                <span className="text-slate-500">
+                  {espSel.length} seleccionada(s)
+                </span>
               </div>
             </div>
 
@@ -530,7 +572,9 @@ export default function EliminarCuposPage() {
                 >
                   Limpiar selección ({medSel.length})
                 </button>
-                <span className="text-slate-500">{medSel.length} seleccionado(s)</span>
+                <span className="text-slate-500">
+                  {medSel.length} seleccionado(s)
+                </span>
               </div>
             </div>
           </div>
@@ -581,8 +625,13 @@ export default function EliminarCuposPage() {
             {STATUS_ORDER.map((k) => {
               const pct = total ? ((stats[k] / total) * 100).toFixed(1) : "0.0";
               return (
-                <div key={k} className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5">
-                  <span className={`inline-block size-2 rounded-full ${STATUS_META[k].dot}`} />
+                <div
+                  key={k}
+                  className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5"
+                >
+                  <span
+                    className={`inline-block size-2 rounded-full ${STATUS_META[k].dot}`}
+                  />
                   <span className="font-medium">{STATUS_META[k].label}:</span>
                   <span className="tabular-nums">{stats[k]}</span>
                   <span className="text-zinc-500">({pct}%)</span>
@@ -595,7 +644,7 @@ export default function EliminarCuposPage() {
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="text-left border-b bg-slate-50">
-                  <th className="px-3 py-2 font-semibold">
+                  <th className="px-3 py-2 font-semibold whitespace-nowrap">
                     <label className="inline-flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -611,6 +660,8 @@ export default function EliminarCuposPage() {
                     "ID Cita",
                     "Fecha",
                     "Hora",
+                    "Tipo Doc",
+                    "N° Documento",
                     "Paciente",
                     "EPS",
                     "ID Médico",
@@ -618,7 +669,10 @@ export default function EliminarCuposPage() {
                     "Estado",
                     "Tipo Cita (CUPS)",
                   ].map((h) => (
-                    <th key={h} className="px-3 py-2 font-semibold">
+                    <th
+                      key={h}
+                      className="px-3 py-2 font-semibold whitespace-nowrap"
+                    >
                       {h}
                     </th>
                   ))}
@@ -627,23 +681,31 @@ export default function EliminarCuposPage() {
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td className="px-3 py-6 text-center text-slate-500" colSpan={10}>
+                    <td
+                      className="px-3 py-6 text-center text-slate-500 whitespace-nowrap"
+                      colSpan={12}
+                    >
                       Sin resultados
                     </td>
                   </tr>
                 )}
                 {rows.map((r, i) => {
                   const id = r.cita_id ?? -1 * (i + 1);
-                  const esCupoLibre = estadoKey(r.estado) === "SIN_ASIGNAR" && r.cita_id != null;
-                  const checked = r.cita_id != null && selectedIds.includes(r.cita_id);
+                  const esCupoLibre =
+                    estadoKey(r.estado) === "SIN_ASIGNAR" && r.cita_id != null;
+                  const checked =
+                    r.cita_id != null && selectedIds.includes(r.cita_id);
                   return (
                     <tr key={`${id}-${i}`} className="border-b">
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 whitespace-nowrap">
                         <input
                           type="checkbox"
                           disabled={!esCupoLibre}
                           checked={checked}
-                          onChange={(e) => r.cita_id && toggleSelectOne(r.cita_id, e.target.checked)}
+                          onChange={(e) =>
+                            r.cita_id &&
+                            toggleSelectOne(r.cita_id, e.target.checked)
+                          }
                           title={
                             esCupoLibre
                               ? "Marcar para eliminar"
@@ -651,21 +713,43 @@ export default function EliminarCuposPage() {
                           }
                         />
                       </td>
-                      <td className="px-3 py-2 tabular-nums">{r.cita_id ?? ""}</td>
-                      <td className="px-3 py-2">{r.fecha}</td>
-                      <td className="px-3 py-2">{r.hora ?? ""}</td>
-                      <td className="px-3 py-2">{r.paciente ?? ""}</td>
-                      <td className="px-3 py-2">{r.eps ?? ""}</td>
-                      <td className="px-3 py-2">{r.idmedico ?? ""}</td>
-                      <td className="px-3 py-2">{r.medico ?? ""}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 tabular-nums whitespace-nowrap">
+                        {r.cita_id ?? ""}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.fecha}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.hora ?? ""}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.doc_tipo ?? ""}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.doc_numero ?? ""}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.paciente ?? ""}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.eps ?? ""}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.idmedico ?? ""}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.medico ?? ""}
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
                         <span
                           className={[
                             "inline-flex items-center rounded-full px-2 py-0.5 text-xs",
-                            estadoKey(r.estado) === "SIN_ASIGNAR" && "bg-zinc-100 text-zinc-700",
-                            estadoKey(r.estado) === "ASIGNADA" && "bg-amber-100 text-amber-700",
-                            estadoKey(r.estado) === "ATENDIDA" && "bg-emerald-100 text-emerald-700",
-                            estadoKey(r.estado) === "CUMPLIDA" && "bg-indigo-100 text-indigo-700",
+                            estadoKey(r.estado) === "SIN_ASIGNAR" &&
+                              "bg-zinc-100 text-zinc-700",
+                            estadoKey(r.estado) === "ASIGNADA" &&
+                              "bg-amber-100 text-amber-700",
+                            estadoKey(r.estado) === "ATENDIDA" &&
+                              "bg-emerald-100 text-emerald-700",
+                            estadoKey(r.estado) === "CUMPLIDA" &&
+                              "bg-indigo-100 text-indigo-700",
                           ]
                             .filter(Boolean)
                             .join(" ")}
@@ -673,7 +757,9 @@ export default function EliminarCuposPage() {
                           {r.estado ?? ""}
                         </span>
                       </td>
-                      <td className="px-3 py-2">{r.tipo_cita ?? ""}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.tipo_cita ?? ""}
+                      </td>
                     </tr>
                   );
                 })}

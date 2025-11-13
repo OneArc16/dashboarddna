@@ -13,6 +13,8 @@ type ReportRow = {
   cita_id: number | null;
   fecha: string;
   hora: string | null;
+  doc_tipo: string | null;   // Tipo_identificaci_n (usuarios)
+  doc_numero: string | null; // Identificaci_n_usuario (usuarios) o idusuario agenda (fallback)
   idusuario: number | null;
   paciente: string | null;
   eps: string | null;
@@ -21,6 +23,15 @@ type ReportRow = {
   estado: string | null;
   tipo_cita: string | null;
 };
+
+// Cupo libre => ocultar documento
+function isCupoLibre(estado?: string | null) {
+  const v = (estado ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toUpperCase();
+  return v.startsWith("SIN ASIGNAR");
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
@@ -72,13 +83,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       whereAgenda = { ...whereAgenda, idmedico: { in: medicos } };
     }
 
-    // ===== Igual que antes: dos caminos (con / sin EPS) =====
-
     // caches
     const userCache = new Map<
       number,
       {
         IdUsuario: number;
+        Identificaci_n_usuario: string | null;
+        Tipo_identificaci_n: string | null;
         Primer_nombre: string | null;
         Segundo_nombre: string | null;
         Primer_apellido: string | null;
@@ -105,6 +116,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           where: { IdUsuario: { in: missing } },
           select: {
             IdUsuario: true,
+            Identificaci_n_usuario: true,
+            Tipo_identificaci_n: true,
             Primer_nombre: true,
             Segundo_nombre: true,
             Primer_apellido: true,
@@ -153,10 +166,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const n = parseInt((a.idusuario ?? "").trim(), 10);
         const u = Number.isFinite(n) ? userCache.get(n) : undefined;
         const d = a.idmedico ? docCache.get(a.idmedico) : undefined;
+
+        const doc_tipo = u?.Tipo_identificaci_n ?? null;
+        const doc_numero = isCupoLibre(a.Estado)
+          ? null
+          : (u?.Identificaci_n_usuario ?? (a.idusuario ?? null));
+
         return {
           cita_id: a.idagenda ?? null,
           fecha: fmtFecha(a.fecha_cita),
           hora: fmtHoraFromIdHora(a.idhora),
+          doc_tipo,
+          doc_numero,
           idusuario: u?.IdUsuario ?? null,
           paciente: buildNombre(u) || null,
           eps: u?.Codigo_eps ?? null,
@@ -217,10 +238,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const n = parseInt((a.idusuario ?? "").trim(), 10);
       const u = Number.isFinite(n) ? userCache.get(n) : undefined;
       const d = a.idmedico ? docCache.get(a.idmedico) : undefined;
+
+      const doc_tipo = u?.Tipo_identificaci_n ?? null;
+      const doc_numero = isCupoLibre(a.Estado)
+        ? null
+        : (u?.Identificaci_n_usuario ?? (a.idusuario ?? null));
+
       return {
         cita_id: a.idagenda ?? null,
         fecha: fmtFecha(a.fecha_cita ?? undefined),
         hora: fmtHoraFromIdHora(a.idhora ?? undefined),
+        doc_tipo,
+        doc_numero,
         idusuario: u?.IdUsuario ?? null,
         paciente: buildNombre(u) || null,
         eps: u?.Codigo_eps ?? null,
