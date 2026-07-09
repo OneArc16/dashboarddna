@@ -3,8 +3,8 @@ import Select, {
   components,
   type GroupBase,
   type MenuListProps,
-  type OptionProps,
   type MultiValue,
+  type OptionProps,
   type StylesConfig,
 } from "react-select";
 
@@ -19,6 +19,9 @@ type Props = {
   summaryLabel?: string;
   noOptionsMessage?: string;
   isDisabled?: boolean;
+  helperText?: string;
+  errorMessage?: string;
+  onBlur?: () => void;
 };
 
 const CheckboxOption = (props: OptionProps<RSOption, true>) => {
@@ -47,29 +50,34 @@ const MenuList = (props: MenuListProps<RSOption, true, GroupBase<RSOption>>) => 
         style={{
           padding: "10px 12px",
           borderBottom: "1px solid #e5e7eb",
-          display: "flex",
-          alignItems: "center",
+          display: "grid",
           gap: 8,
           background: "#f8fafc",
         }}
       >
-        <input
-          type="checkbox"
-          checked={allChecked}
-          ref={(el) => {
-            if (el) el.indeterminate = someChecked;
-          }}
-          onChange={(e) => {
-            if (e.target.checked) {
-              props.setValue(allOptions, "select-option");
-            } else {
-              props.setValue([], "deselect-option");
-            }
-          }}
-        />
-        <span style={{ fontSize: 12, color: "#334155", fontWeight: 500 }}>
-          Marcar todos ({allOptions.length})
-        </span>
+        <p style={{ margin: 0, fontSize: 12, color: "#475569", lineHeight: 1.4 }}>
+          Escribe para filtrar y marca varias opciones.
+        </p>
+
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={allChecked}
+            ref={(element) => {
+              if (element) element.indeterminate = someChecked;
+            }}
+            onChange={(event) => {
+              if (event.target.checked) {
+                props.setValue(allOptions, "select-option");
+              } else {
+                props.setValue([], "deselect-option");
+              }
+            }}
+          />
+          <span style={{ fontSize: 12, color: "#334155", fontWeight: 500 }}>
+            Marcar todos ({allOptions.length})
+          </span>
+        </label>
       </div>
 
       {props.children}
@@ -104,20 +112,28 @@ const MenuList = (props: MenuListProps<RSOption, true, GroupBase<RSOption>>) => 
 };
 
 const selectStyles: StylesConfig<RSOption, true> = {
-  control: (base, state) => ({
-    ...base,
-    minHeight: 44,
-    borderRadius: 14,
-    borderColor: state.isFocused ? "#0891b2" : "#cbd5e1",
-    boxShadow: state.isFocused ? "0 0 0 4px rgba(8, 145, 178, 0.12)" : "0 1px 2px rgba(15, 23, 42, 0.04)",
-    padding: "2px 6px",
-    backgroundColor: state.isDisabled ? "#f1f5f9" : "#ffffff",
-    transition: "border-color 150ms ease, box-shadow 150ms ease",
-    cursor: state.isDisabled ? "not-allowed" : "pointer",
-    "&:hover": {
-      borderColor: state.isFocused ? "#0891b2" : "#94a3b8",
-    },
-  }),
+  control: (base, state) => {
+    const isInvalid = Boolean(state.selectProps["aria-invalid"]);
+
+    return {
+      ...base,
+      minHeight: 44,
+      borderRadius: 14,
+      borderColor: isInvalid ? "#fca5a5" : state.isFocused ? "#0891b2" : "#cbd5e1",
+      boxShadow: isInvalid
+        ? "0 0 0 4px rgba(239, 68, 68, 0.08)"
+        : state.isFocused
+          ? "0 0 0 4px rgba(8, 145, 178, 0.12)"
+          : "0 1px 2px rgba(15, 23, 42, 0.04)",
+      padding: "2px 6px",
+      backgroundColor: state.isDisabled ? "#f1f5f9" : "#ffffff",
+      transition: "border-color 150ms ease, box-shadow 150ms ease",
+      cursor: state.isDisabled ? "not-allowed" : "pointer",
+      "&:hover": {
+        borderColor: isInvalid ? "#f87171" : state.isFocused ? "#0891b2" : "#94a3b8",
+      },
+    };
+  },
   valueContainer: (base) => ({
     ...base,
     gap: 6,
@@ -157,11 +173,7 @@ const selectStyles: StylesConfig<RSOption, true> = {
     display: "flex",
     alignItems: "center",
     minHeight: 40,
-    backgroundColor: state.isSelected
-      ? "#e0f2fe"
-      : state.isFocused
-        ? "#f8fafc"
-        : "#ffffff",
+    backgroundColor: state.isSelected ? "#e0f2fe" : state.isFocused ? "#f8fafc" : "#ffffff",
     color: "#0f172a",
     cursor: "pointer",
   }),
@@ -191,20 +203,33 @@ const selectStyles: StylesConfig<RSOption, true> = {
 
 export default function MultiSelectRS({
   label,
-  placeholder = "Selecciona…",
+  placeholder = "Selecciona...",
   options,
   value,
   onChange,
   summaryLabel,
   noOptionsMessage = "Sin coincidencias",
   isDisabled = false,
+  helperText,
+  errorMessage,
+  onBlur,
 }: Props) {
   const inputId = React.useId();
-  const helperText = value.length === 0
-    ? "Sin selección"
-    : value.length === 1
-      ? value[0]?.label
-      : `${value.length} ${summaryLabel ?? "elementos"} seleccionados`;
+  const helperId = `${inputId}-helper`;
+  const errorId = `${inputId}-error`;
+  const isInvalid = Boolean(errorMessage);
+  const selectionSummary =
+    value.length === 0
+      ? "Sin seleccion."
+      : value.length === 1
+        ? `${value[0]?.label} seleccionada.`
+        : `${value.length} ${summaryLabel ?? "elementos"} seleccionados.`;
+
+  const helperLabel =
+    helperText ??
+    `Escribe para filtrar. ${options.length} disponible(s). ${selectionSummary}`;
+
+  const describedBy = [helperId, isInvalid ? errorId : ""].filter(Boolean).join(" ");
 
   return (
     <div className="w-full">
@@ -213,12 +238,14 @@ export default function MultiSelectRS({
           {label}
         </label>
       )}
+
       <Select<RSOption, true>
         inputId={inputId}
         isMulti
         options={options}
         value={value}
-        onChange={(val) => onChange(val as MultiValue<RSOption> as RSOption[])}
+        onChange={(nextValue) => onChange(nextValue as MultiValue<RSOption> as RSOption[])}
+        onBlur={onBlur}
         classNamePrefix="rs"
         closeMenuOnSelect={false}
         hideSelectedOptions={false}
@@ -227,8 +254,19 @@ export default function MultiSelectRS({
         noOptionsMessage={() => noOptionsMessage}
         isDisabled={isDisabled}
         styles={selectStyles}
+        aria-invalid={isInvalid}
+        aria-describedby={describedBy}
       />
-      <p className="mt-2 text-xs text-slate-500">{helperText}</p>
+
+      <p id={helperId} className="mt-2 text-xs text-slate-500">
+        {helperLabel}
+      </p>
+
+      {errorMessage ? (
+        <p id={errorId} role="alert" className="mt-1 text-sm font-medium text-red-700">
+          {errorMessage}
+        </p>
+      ) : null}
     </div>
   );
 }

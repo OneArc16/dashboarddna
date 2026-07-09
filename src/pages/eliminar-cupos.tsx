@@ -6,21 +6,33 @@ import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import {
   CalendarRange,
-  ListChecks,
   RotateCcw,
   Search,
   ShieldAlert,
   Trash2,
 } from "lucide-react";
+import FieldError from "@/components/agenda/FieldError";
 import PageHeader from "@/components/agenda/PageHeader";
+import ResponsiveResultsTable from "@/components/agenda/ResponsiveResultsTable";
+import SelectionActionBar from "@/components/agenda/SelectionActionBar";
 import StatsOverview from "@/components/agenda/StatsOverview";
-import StatusBadge from "@/components/agenda/StatusBadge";
 import StatusMessage from "@/components/agenda/StatusMessage";
-import TableStateRow from "@/components/agenda/TableStateRow";
 import ModulesMenu from "@/components/ModulesMenu";
 import MultiSelectRS, { type RSOption } from "@/components/MultiSelectRS";
 import {
+  createOptionPlaceholders,
+  filterSelectedOptions,
+  getOptionValues,
+  normalizeSelectedOptions,
+  parseQueryCsv,
+  parseQueryValue,
+  toQueryParams,
+  useAgendaFilters,
+} from "@/hooks/useAgendaFilters";
+import { useAgendaValidation } from "@/hooks/useAgendaValidation";
+import {
   INPUT_CLASS_NAME,
+  INPUT_INVALID_CLASS_NAME,
   buildStats,
   estadoKey,
   getErrorMessage,
@@ -41,20 +53,21 @@ type CuposListPayload = {
   medicosCsv?: string;
 };
 
-const TABLE_HEADERS = [
-  "Sel.",
-  "ID Cita",
-  "Fecha",
-  "Hora",
-  "Tipo Doc",
-  "N° Documento",
-  "Paciente",
-  "Telefono",
-  "EPS",
-  "Medico",
-  "Estado",
-  "Tipo Cita (CUPS)",
-];
+type DeleteField = "desde" | "hasta" | "horaDesde" | "horaHasta";
+type DeleteFiltersState = {
+  desde: string;
+  hasta: string;
+  horaDesde: string;
+  horaHasta: string;
+  eps: string;
+  espSel: RSOption[];
+  medSel: RSOption[];
+};
+
+const createDefaultResultsNotice = () => ({
+  tone: "info" as const,
+  message: "Ajusta el rango y pulsa Buscar para revisar los cupos disponibles.",
+});
 
 const toValues = (options: RSOption[]) => options.map((option) => option.value);
 
@@ -212,19 +225,27 @@ export default function EliminarCuposPage() {
   const [horaDesde, setHoraDesde] = useState("");
   const [horaHasta, setHoraHasta] = useState("");
   const [eps, setEps] = useState("");
-
   const [espOptions, setEspOptions] = useState<RSOption[]>([]);
   const [espSel, setEspSel] = useState<RSOption[]>([]);
   const [medOptions, setMedOptions] = useState<RSOption[]>([]);
   const [medSel, setMedSel] = useState<RSOption[]>([]);
   const [epsOpts, setEpsOpts] = useState<RSOption[]>([]);
-
   const [rows, setRows] = useState<AgendaRow[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [resultsNotice, setResultsNotice] = useState<{
+    tone: "success" | "danger" | "info";
+    message: string;
+  }>(createDefaultResultsNotice());
 
   const confirmDialog = useConfirmDialog();
+
+  const desdeRef = useRef<HTMLInputElement>(null);
+  const hastaRef = useRef<HTMLInputElement>(null);
+  const horaDesdeRef = useRef<HTMLInputElement>(null);
+  const horaHastaRef = useRef<HTMLInputElement>(null);
 
   const stats = useMemo(() => buildStats(rows), [rows]);
   const total = rows.length;
@@ -235,28 +256,148 @@ export default function EliminarCuposPage() {
   );
 
   const selectedCount = selectedIds.length;
-  const allSelectableIds = useMemo(
-    () => cuposLibres.map((row) => row.cita_id!),
-    [cuposLibres],
-  );
+  const allSelectableIds = useMemo(() => cuposLibres.map((row) => row.cita_id!), [cuposLibres]);
   const allSelected =
-    allSelectableIds.length > 0 &&
-    allSelectableIds.every((id) => selectedIds.includes(id));
+    allSelectableIds.length > 0 && allSelectableIds.every((id) => selectedIds.includes(id));
 
-  const searchMessage = useMemo(() => {
-    if (!desde || !hasta) {
-      return "Selecciona fecha inicial y final para habilitar la busqueda.";
+  const fieldErrors = useMemo(() => {
+    const nextErrors: Partial<Record<DeleteField, string>> = {};
+
+    if (!desde) nextErrors.desde = "Selecciona la fecha inicial.";
+    if (!hasta) nextErrors.hasta = "Selecciona la fecha final.";
+
+    if (desde && hasta && desde > hasta) {
+      nextErrors.desde = "La fecha inicial no puede ser mayor que la fecha final.";
+      nextErrors.hasta = "La fecha final debe ser igual o posterior a la fecha inicial.";
     }
-    if (desde > hasta) {
-      return "La fecha inicial no puede ser mayor que la fecha final.";
-    }
+
     if (horaDesde && horaHasta && horaDesde > horaHasta) {
-      return "La hora inicial no puede ser mayor que la hora final.";
+      nextErrors.horaDesde = "La hora inicial no puede ser mayor que la hora final.";
+      nextErrors.horaHasta = "La hora final debe ser igual o posterior a la hora inicial.";
     }
-    return "";
+
+    return nextErrors;
   }, [desde, hasta, horaDesde, horaHasta]);
 
-  const canSearch = !loading && !deleting && !searchMessage;
+  const validation = useAgendaValidation<DeleteField>({
+    errors: fieldErrors,
+    fieldOrder: ["desde", "hasta", "horaDesde", "horaHasta"],
+    fieldRefs: {
+      desde: desdeRef,
+      hasta: hastaRef,
+      horaDesde: horaDesdeRef,
+      horaHasta: horaHastaRef,
+    },
+  });
+
+  const hasValidationErrors = Object.keys(fieldErrors).length > 0;
+  const hasActiveFilters =
+    Boolean(desde || hasta || horaDesde || horaHasta || eps) ||
+    espSel.length > 0 ||
+    medSel.length > 0;
+
+  const filterState = useMemo<DeleteFiltersState>(
+    () => ({
+      desde,
+      hasta,
+      horaDesde,
+      horaHasta,
+      eps,
+      espSel,
+      medSel,
+    }),
+    [desde, hasta, horaDesde, horaHasta, eps, espSel, medSel],
+  );
+
+  const querySync = useAgendaFilters<DeleteFiltersState>({
+    state: filterState,
+    parse: (query) => ({
+      desde: parseQueryValue(query, "desde"),
+      hasta: parseQueryValue(query, "hasta"),
+      horaDesde: parseQueryValue(query, "horaDesde"),
+      horaHasta: parseQueryValue(query, "horaHasta"),
+      eps: parseQueryValue(query, "eps"),
+      espSel: createOptionPlaceholders(parseQueryCsv(query, "especialidades")),
+      medSel: createOptionPlaceholders(parseQueryCsv(query, "medicos")),
+    }),
+    serialize: (state) =>
+      toQueryParams([
+        ["desde", state.desde],
+        ["hasta", state.hasta],
+        ["horaDesde", state.horaDesde],
+        ["horaHasta", state.horaHasta],
+        ["eps", state.eps],
+        ["especialidades", getOptionValues(state.espSel).join(",")],
+        ["medicos", getOptionValues(state.medSel).join(",")],
+      ]),
+    apply: (nextState) => {
+      setDesde(nextState.desde);
+      setHasta(nextState.hasta);
+      setHoraDesde(nextState.horaDesde);
+      setHoraHasta(nextState.horaHasta);
+      setEps(nextState.eps);
+      setEspSel(nextState.espSel);
+      setMedSel(nextState.medSel);
+    },
+  });
+
+  const formMessage = useMemo(() => {
+    if (hasValidationErrors) {
+      return {
+        tone: "warning" as const,
+        message: "Corrige el rango o las horas antes de ejecutar la busqueda.",
+      };
+    }
+
+    if (!desde || !hasta) {
+      return {
+        tone: "warning" as const,
+        message: "Selecciona fecha inicial y final para preparar la busqueda.",
+      };
+    }
+
+    return {
+      tone: "success" as const,
+      message: "Rango listo. Solo se podran seleccionar cupos sin asignar.",
+    };
+  }, [desde, hasta, hasValidationErrors]);
+
+  const resultsStatus = useMemo(() => {
+    if (loading) {
+      return {
+        tone: "info" as const,
+        message: "Actualizando la lista de cupos con los filtros actuales...",
+      };
+    }
+
+    if (deleting) {
+      return {
+        tone: "info" as const,
+        message: "Eliminando los cupos seleccionados...",
+      };
+    }
+
+    if (rows.length > 0 || hasSearched) {
+      return resultsNotice;
+    }
+
+    if (querySync.hasQueryState && hasActiveFilters) {
+      return {
+        tone: "info" as const,
+        message: "Filtros restaurados desde la URL. Pulsa Buscar para revisar los cupos.",
+      };
+    }
+
+    return resultsNotice;
+  }, [
+    deleting,
+    hasActiveFilters,
+    hasSearched,
+    loading,
+    querySync.hasQueryState,
+    resultsNotice,
+    rows.length,
+  ]);
 
   useEffect(() => {
     (async () => {
@@ -279,21 +420,23 @@ export default function EliminarCuposPage() {
   }, []);
 
   useEffect(() => {
+    if (espOptions.length === 0) return;
+
+    setEspSel((prev) => normalizeSelectedOptions(prev, espOptions));
+  }, [espOptions]);
+
+  useEffect(() => {
     (async () => {
       try {
-        setMedSel([]);
-
         if (espSel.length === 0) {
           const response = await fetch("/api/catalog/medicos");
           const { options } = await response.json().catch(() => ({
             options: [] as RSOption[],
           }));
-          const nextOptions = (options as RSOption[]) ?? [];
 
+          const nextOptions = (options as RSOption[]) ?? [];
           setMedOptions(nextOptions);
-          setMedSel((prev) =>
-            prev.filter((item) => nextOptions.some((option) => option.value === item.value)),
-          );
+          setMedSel((prev) => normalizeSelectedOptions(filterSelectedOptions(prev, nextOptions), nextOptions));
           return;
         }
 
@@ -304,28 +447,28 @@ export default function EliminarCuposPage() {
         const { options } = await response.json().catch(() => ({
           options: [] as RSOption[],
         }));
-        const nextOptions = (options as RSOption[]) ?? [];
 
+        const nextOptions = (options as RSOption[]) ?? [];
         setMedOptions(nextOptions);
-        setMedSel((prev) =>
-          prev.filter((item) => nextOptions.some((option) => option.value === item.value)),
-        );
+        setMedSel((prev) => normalizeSelectedOptions(filterSelectedOptions(prev, nextOptions), nextOptions));
       } catch (error) {
         console.error(error);
         setMedOptions([]);
+        setMedSel([]);
       }
     })();
   }, [espSel]);
 
   const handleBuscar = async () => {
-    if (!desde || !hasta) return toast.error("Selecciona el rango de fechas.");
-    if (desde > hasta) return toast.error("La fecha 'Desde' no puede ser mayor a 'Hasta'.");
-    if (horaDesde && horaHasta && horaDesde > horaHasta) {
-      return toast.error("La hora 'Desde' no puede ser mayor a 'Hasta'.");
-    }
+    if (!validation.validate()) return;
 
+    setHasSearched(true);
     setLoading(true);
     setSelectedIds([]);
+    setResultsNotice({
+      tone: "info",
+      message: "Actualizando la lista de cupos con los filtros actuales...",
+    });
 
     const especialidades = toValues(espSel);
     const medicos = toValues(medSel);
@@ -365,11 +508,23 @@ export default function EliminarCuposPage() {
 
       const data = (await response.json()) as { rows: AgendaRow[] };
       const nextRows = data?.rows || [];
+      const nextCuposLibres = nextRows.filter(
+        (row) => estadoKey(row.estado) === "SIN_ASIGNAR" && row.cita_id != null,
+      ).length;
+
       setRows(nextRows);
-      toast.success(`Se cargaron ${nextRows.length} registro(s).`);
+      setResultsNotice({
+        tone: "success",
+        message: `Consulta lista. ${nextRows.length} registro(s) cargados y ${nextCuposLibres} cupo(s) libre(s) disponibles para eliminar.`,
+      });
     } catch (error: unknown) {
       console.error("Buscar error:", error);
-      toast.error(getErrorMessage(error, "Error al buscar."));
+      const message = getErrorMessage(error, "Error al buscar.");
+      setResultsNotice({
+        tone: "danger",
+        message,
+      });
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -400,13 +555,14 @@ export default function EliminarCuposPage() {
 
   const selectAllCuposLibres = () => {
     setSelectedIds(allSelectableIds);
-    toast.success(`Seleccionados ${allSelectableIds.length} cupo(s) libre(s).`);
   };
 
-  const clearSelection = () => setSelectedIds([]);
+  const clearSelection = () => {
+    setSelectedIds([]);
+  };
 
   const handleEliminar = async () => {
-    if (selectedIds.length === 0) return toast.error("No hay cupos seleccionados para eliminar.");
+    if (selectedIds.length === 0) return;
 
     const confirmed = await confirmDialog.ask();
     if (!confirmed) return;
@@ -431,10 +587,18 @@ export default function EliminarCuposPage() {
 
       setRows(nextRows);
       setSelectedIds([]);
-      toast.success(`Eliminados ${deleted} cupo(s).`);
+      setResultsNotice({
+        tone: "success",
+        message: `Eliminacion completada. Se quitaron ${deleted} cupo(s) del resultado actual.`,
+      });
     } catch (error: unknown) {
       console.error(error);
-      toast.error(getErrorMessage(error, "Error al eliminar."));
+      const message = getErrorMessage(error, "Error al eliminar.");
+      setResultsNotice({
+        tone: "danger",
+        message,
+      });
+      toast.error(message);
     } finally {
       setDeleting(false);
     }
@@ -450,7 +614,15 @@ export default function EliminarCuposPage() {
     setMedSel([]);
     setRows([]);
     setSelectedIds([]);
+    setHasSearched(false);
+    setResultsNotice(createDefaultResultsNotice());
+    validation.resetValidation();
   };
+
+  const desdeError = validation.getFieldError("desde");
+  const hastaError = validation.getFieldError("hasta");
+  const horaDesdeError = validation.getFieldError("horaDesde");
+  const horaHastaError = validation.getFieldError("horaHasta");
 
   return (
     <>
@@ -468,18 +640,17 @@ export default function EliminarCuposPage() {
         <section className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                Filtros de busqueda
-              </h2>
+              <h2 className="text-lg font-semibold text-slate-900">Filtros de busqueda</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Define primero el rango y luego filtra por EPS, especialidad o medico.
+                Define primero el rango y luego afina por EPS, especialidad o medico si hace
+                falta.
               </p>
             </div>
 
             <StatusMessage
               icon={CalendarRange}
-              message={searchMessage || "Rango listo. Solo se podran seleccionar cupos sin asignar."}
-              tone={searchMessage ? "warning" : "success"}
+              message={formMessage.message}
+              tone={formMessage.tone}
             />
           </div>
 
@@ -489,15 +660,20 @@ export default function EliminarCuposPage() {
                 Desde
               </label>
               <input
+                ref={desdeRef}
                 id="cupos-desde"
                 type="date"
                 value={desde}
                 onChange={(event) => setDesde(event.target.value)}
+                onBlur={() => validation.markTouched("desde")}
+                aria-invalid={Boolean(desdeError)}
+                aria-describedby={desdeError ? "cupos-desde-error" : undefined}
                 className={[
                   INPUT_CLASS_NAME,
-                  searchMessage && desde && hasta ? "border-amber-300 focus:ring-amber-500/10" : "",
+                  desdeError ? INPUT_INVALID_CLASS_NAME : "",
                 ].join(" ")}
               />
+              <FieldError id="cupos-desde-error" message={desdeError} />
             </div>
 
             <div className="md:col-span-3">
@@ -505,15 +681,20 @@ export default function EliminarCuposPage() {
                 Hasta
               </label>
               <input
+                ref={hastaRef}
                 id="cupos-hasta"
                 type="date"
                 value={hasta}
                 onChange={(event) => setHasta(event.target.value)}
+                onBlur={() => validation.markTouched("hasta")}
+                aria-invalid={Boolean(hastaError)}
+                aria-describedby={hastaError ? "cupos-hasta-error" : undefined}
                 className={[
                   INPUT_CLASS_NAME,
-                  searchMessage && desde && hasta ? "border-amber-300 focus:ring-amber-500/10" : "",
+                  hastaError ? INPUT_INVALID_CLASS_NAME : "",
                 ].join(" ")}
               />
+              <FieldError id="cupos-hasta-error" message={hastaError} />
             </div>
 
             <div className="md:col-span-2">
@@ -521,17 +702,20 @@ export default function EliminarCuposPage() {
                 Hora desde
               </label>
               <input
+                ref={horaDesdeRef}
                 id="cupos-hora-desde"
                 type="time"
                 value={horaDesde}
                 onChange={(event) => setHoraDesde(event.target.value)}
+                onBlur={() => validation.markTouched("horaDesde")}
+                aria-invalid={Boolean(horaDesdeError)}
+                aria-describedby={horaDesdeError ? "cupos-hora-desde-error" : undefined}
                 className={[
                   INPUT_CLASS_NAME,
-                  horaDesde && horaHasta && horaDesde > horaHasta
-                    ? "border-amber-300 focus:ring-amber-500/10"
-                    : "",
+                  horaDesdeError ? INPUT_INVALID_CLASS_NAME : "",
                 ].join(" ")}
               />
+              <FieldError id="cupos-hora-desde-error" message={horaDesdeError} />
             </div>
 
             <div className="md:col-span-2">
@@ -539,17 +723,20 @@ export default function EliminarCuposPage() {
                 Hora hasta
               </label>
               <input
+                ref={horaHastaRef}
                 id="cupos-hora-hasta"
                 type="time"
                 value={horaHasta}
                 onChange={(event) => setHoraHasta(event.target.value)}
+                onBlur={() => validation.markTouched("horaHasta")}
+                aria-invalid={Boolean(horaHastaError)}
+                aria-describedby={horaHastaError ? "cupos-hora-hasta-error" : undefined}
                 className={[
                   INPUT_CLASS_NAME,
-                  horaDesde && horaHasta && horaDesde > horaHasta
-                    ? "border-amber-300 focus:ring-amber-500/10"
-                    : "",
+                  horaHastaError ? INPUT_INVALID_CLASS_NAME : "",
                 ].join(" ")}
               />
+              <FieldError id="cupos-hora-hasta-error" message={horaHastaError} />
             </div>
 
             <div className="md:col-span-2">
@@ -588,6 +775,7 @@ export default function EliminarCuposPage() {
                   value={espSel}
                   onChange={setEspSel}
                   summaryLabel="especialidades"
+                  helperText={`Escribe para filtrar. ${espOptions.length} especialidad(es) disponibles.`}
                 />
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                   <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium">
@@ -612,6 +800,16 @@ export default function EliminarCuposPage() {
                   value={medSel}
                   onChange={setMedSel}
                   summaryLabel="medicos"
+                  helperText={
+                    espSel.length > 0
+                      ? `Escribe para filtrar. ${medOptions.length} medico(s) disponibles para la especialidad actual.`
+                      : `Escribe para filtrar. ${medOptions.length} medico(s) disponibles en total.`
+                  }
+                  noOptionsMessage={
+                    espSel.length > 0
+                      ? "No hay medicos para la especialidad seleccionada."
+                      : "Sin coincidencias."
+                  }
                 />
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                   <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium">
@@ -626,17 +824,20 @@ export default function EliminarCuposPage() {
                     Limpiar
                   </button>
                   <span className="text-slate-500">
-                    {medOptions.length} medico(s) disponibles con la seleccion actual.
+                    {espSel.length > 0
+                      ? "La lista se ajusta automaticamente a la especialidad seleccionada."
+                      : "La lista muestra todos los medicos disponibles."}
                   </span>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <button
+              type="button"
               onClick={handleBuscar}
-              disabled={!canSearch}
+              disabled={loading || deleting}
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               <Search className="h-4 w-4" />
@@ -653,7 +854,8 @@ export default function EliminarCuposPage() {
             </button>
 
             <p className="text-sm text-slate-500">
-              La seleccion se limpia automaticamente cada vez que se ejecuta una nueva busqueda.
+              Los filtros se conservan en la URL y la seleccion se limpia cuando ejecutas una nueva
+              busqueda.
             </p>
           </div>
         </section>
@@ -664,15 +866,11 @@ export default function EliminarCuposPage() {
         >
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                Resultados y seleccion
-              </h2>
+              <h2 className="text-lg font-semibold text-slate-900">Resultados y seleccion</h2>
               <p className="mt-1 text-sm text-slate-600">
                 {rows.length > 0
-                  ? `Mostrando ${rows.length} registro(s). Marca solo los cupos libres que quieras eliminar.`
-                  : canSearch
-                    ? "Ejecuta la busqueda para revisar cupos y seleccionar los eliminables."
-                    : "Completa un rango valido para empezar."}
+                  ? `Mostrando ${rows.length} registro(s). Selecciona solo los cupos libres que quieras eliminar.`
+                  : "La tabla y las tarjetas muestran el mismo resultado segun el ancho de pantalla."}
               </p>
             </div>
 
@@ -681,177 +879,47 @@ export default function EliminarCuposPage() {
             </div>
           </div>
 
+          <StatusMessage
+            icon={loading || deleting ? Search : CalendarRange}
+            message={resultsStatus.message}
+            tone={resultsStatus.tone}
+            className="mt-4"
+          />
+
           <StatsOverview stats={stats} total={total} />
 
-          <div
-            className={[
-              "mt-5 rounded-2xl border p-3.5",
-              selectedCount > 0
-                ? "border-red-200 bg-red-50/80"
-                : "border-slate-200 bg-slate-50/80",
-            ].join(" ")}
-          >
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-slate-900">
-                  {selectedCount > 0
-                    ? `${selectedCount} cupo(s) listo(s) para eliminar`
-                    : "Selecciona los cupos libres del resultado actual"}
-                </p>
-                <p className="mt-1 text-sm text-slate-600">
-                  {cuposLibres.length} cupo(s) libre(s) disponibles. Los estados distintos a
-                  SIN ASIGNAR quedan bloqueados.
-                </p>
-              </div>
+          {(rows.length > 0 || selectedCount > 0) && (
+            <SelectionActionBar
+              selectedCount={selectedCount}
+              availableCount={cuposLibres.length}
+              deleting={deleting}
+              onSelectAll={selectAllCuposLibres}
+              onClear={clearSelection}
+              onDelete={handleEliminar}
+            />
+          )}
 
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={selectAllCuposLibres}
-                  disabled={cuposLibres.length === 0 || deleting}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                >
-                  <ListChecks className="h-4 w-4" />
-                  Seleccionar cupos libres
-                </button>
-
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  disabled={selectedCount === 0 || deleting}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Limpiar seleccion
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleEliminar}
-                  disabled={selectedCount === 0 || deleting}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {deleting ? "Eliminando..." : "Eliminar seleccionados"}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
-            <table className="min-w-full text-sm">
-              <caption className="sr-only">Resultados de cupos disponibles para eliminacion</caption>
-              <thead className="bg-slate-50">
-                <tr className="text-left">
-                  <th className="sticky top-0 z-10 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    <label className="inline-flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        onChange={toggleSelectAllVisible}
-                        disabled={cuposLibres.length === 0 || deleting}
-                        className="h-4 w-4 rounded border-slate-400 text-red-600 focus:ring-red-500"
-                        title="Seleccionar o deseleccionar todos los cupos libres visibles"
-                      />
-                      Sel.
-                    </label>
-                  </th>
-
-                  {TABLE_HEADERS.slice(1).map((header) => (
-                    <th
-                      key={header}
-                      className="sticky top-0 z-10 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"
-                    >
-                      {header}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <TableStateRow
-                    colSpan={TABLE_HEADERS.length}
-                    loading={loading}
-                    emptyTitle="Aun no hay resultados visibles."
-                    emptyDescription="Usa un rango valido y pulsa Buscar."
-                  />
-                ) : (
-                  rows.map((row, index) => {
-                    const rowId = row.cita_id ?? -1 * (index + 1);
-                    const esCupoLibre =
-                      estadoKey(row.estado) === "SIN_ASIGNAR" && row.cita_id != null;
-                    const checked =
-                      row.cita_id != null && selectedIds.includes(row.cita_id);
-
-                    return (
-                      <tr
-                        key={`${rowId}-${index}`}
-                        className={[
-                          "border-b border-slate-200",
-                          checked
-                            ? "bg-red-50 hover:bg-red-100/70"
-                            : esCupoLibre
-                              ? "bg-white even:bg-slate-50/50 hover:bg-cyan-50/50"
-                              : "bg-slate-50/80 text-slate-600 hover:bg-slate-100/80",
-                        ].join(" ")}
-                      >
-                        <td className="whitespace-nowrap px-3 py-3">
-                          <input
-                            type="checkbox"
-                            disabled={!esCupoLibre || deleting}
-                            checked={checked}
-                            onChange={(event) =>
-                              row.cita_id && toggleSelectOne(row.cita_id, event.target.checked)
-                            }
-                            className="h-4 w-4 rounded border-slate-400 text-red-600 focus:ring-red-500"
-                            aria-label={
-                              esCupoLibre
-                                ? `Seleccionar cita ${row.cita_id} para eliminar`
-                                : `La cita ${row.cita_id ?? ""} no es eliminable`
-                            }
-                            title={
-                              esCupoLibre
-                                ? "Marcar para eliminar"
-                                : "Solo se pueden seleccionar cupos SIN ASIGNAR"
-                            }
-                          />
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 tabular-nums">{row.cita_id ?? ""}</td>
-                        <td className="whitespace-nowrap px-3 py-3">{row.fecha}</td>
-                        <td className="whitespace-nowrap px-3 py-3">{row.hora ?? ""}</td>
-                        <td className="whitespace-nowrap px-3 py-3">{row.doc_tipo ?? ""}</td>
-                        <td className="whitespace-nowrap px-3 py-3">{row.doc_numero ?? ""}</td>
-                        <td className="px-3 py-3">
-                          <div className="max-w-[220px] truncate" title={row.paciente ?? ""}>
-                            {row.paciente ?? ""}
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3">{row.telefono ?? ""}</td>
-                        <td className="px-3 py-3">
-                          <div className="max-w-[180px] truncate" title={row.eps ?? ""}>
-                            {row.eps ?? ""}
-                          </div>
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="max-w-[220px] truncate" title={row.medico ?? ""}>
-                            {row.medico ?? ""}
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3">
-                          <StatusBadge estado={row.estado} />
-                        </td>
-                        <td className="px-3 py-3">
-                          <div className="max-w-[240px] truncate" title={row.tipo_cita ?? ""}>
-                            {row.tipo_cita ?? ""}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveResultsTable
+            rows={rows}
+            loading={loading}
+            caption="Resultados de cupos disponibles para eliminacion"
+            emptyTitle="Aun no hay resultados visibles."
+            emptyDescription={
+              hasSearched
+                ? "No se encontraron cupos para los filtros actuales."
+                : querySync.hasQueryState
+                ? "Los filtros ya estan listos. Pulsa Buscar para revisar los cupos."
+                : "Define un rango valido y pulsa Buscar."
+            }
+            selection={{
+              allSelected,
+              deleting,
+              selectedIds,
+              selectableCount: allSelectableIds.length,
+              onToggleAll: toggleSelectAllVisible,
+              onToggleRow: toggleSelectOne,
+            }}
+          />
         </section>
       </div>
 

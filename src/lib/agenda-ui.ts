@@ -17,11 +17,48 @@ export type AgendaRow = {
 export type StatKey = "ASIGNADA" | "ATENDIDA" | "CUMPLIDA" | "SIN_ASIGNAR";
 export type StatTotals = Record<StatKey, number>;
 
-export const STATUS_META: Record<StatKey, { label: string; dot: string }> = {
-  ASIGNADA: { label: "Inasistentes", dot: "bg-amber-500" },
-  ATENDIDA: { label: "Atendidas", dot: "bg-emerald-500" },
-  CUMPLIDA: { label: "Activadas", dot: "bg-indigo-500" },
-  SIN_ASIGNAR: { label: "Cupos libres", dot: "bg-zinc-400" },
+type StatusMeta = {
+  summaryLabel: string;
+  filterLabel: string;
+  badgeLabel: string;
+  helperText: string;
+  dot: string;
+  badgeClass: string;
+};
+
+export const STATUS_META: Record<StatKey, StatusMeta> = {
+  ASIGNADA: {
+    summaryLabel: "Asignadas",
+    filterLabel: "Asignadas",
+    badgeLabel: "Asignada",
+    helperText: "Citas que ya tienen paciente asignado.",
+    dot: "bg-amber-500",
+    badgeClass: "border border-amber-200 bg-amber-100 text-amber-900",
+  },
+  ATENDIDA: {
+    summaryLabel: "Atendidas",
+    filterLabel: "Atendidas",
+    badgeLabel: "Atendida",
+    helperText: "Citas atendidas y cerradas correctamente.",
+    dot: "bg-emerald-500",
+    badgeClass: "border border-emerald-200 bg-emerald-100 text-emerald-900",
+  },
+  CUMPLIDA: {
+    summaryLabel: "Activadas",
+    filterLabel: "Activadas",
+    badgeLabel: "Activada",
+    helperText: "Registros marcados como cumplidos en el sistema.",
+    dot: "bg-indigo-500",
+    badgeClass: "border border-indigo-200 bg-indigo-100 text-indigo-900",
+  },
+  SIN_ASIGNAR: {
+    summaryLabel: "Sin asignar",
+    filterLabel: "Sin asignar",
+    badgeLabel: "Sin asignar",
+    helperText: "Cupos disponibles sin paciente asociado.",
+    dot: "bg-zinc-400",
+    badgeClass: "border border-zinc-200 bg-zinc-100 text-zinc-800",
+  },
 };
 
 export const STATUS_ORDER: StatKey[] = [
@@ -31,27 +68,11 @@ export const STATUS_ORDER: StatKey[] = [
   "SIN_ASIGNAR",
 ];
 
-const BADGE_META: Record<StatKey, { label: string; cls: string }> = {
-  ASIGNADA: {
-    label: "Asignada",
-    cls: "border border-amber-200 bg-amber-100 text-amber-900",
-  },
-  ATENDIDA: {
-    label: "Atendido",
-    cls: "border border-emerald-200 bg-emerald-100 text-emerald-900",
-  },
-  CUMPLIDA: {
-    label: "Activada",
-    cls: "border border-indigo-200 bg-indigo-100 text-indigo-900",
-  },
-  SIN_ASIGNAR: {
-    label: "Sin asignar",
-    cls: "border border-zinc-200 bg-zinc-100 text-zinc-800",
-  },
-};
-
 export const INPUT_CLASS_NAME =
   "mt-1 h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm transition focus:outline-none focus:ring-4 focus:ring-cyan-600/10";
+
+export const INPUT_INVALID_CLASS_NAME =
+  "border-red-300 bg-red-50/60 focus:ring-red-500/10";
 
 export const createEmptyStats = (): StatTotals => ({
   ASIGNADA: 0,
@@ -66,6 +87,13 @@ export const getErrorMessage = (error: unknown, fallback: string) =>
 const normalize = (value?: string | null) =>
   (value ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
 
+export const hasText = (value?: string | null) => Boolean(value?.trim());
+
+export const formatAgendaValue = (
+  value?: string | null,
+  fallback = "Sin dato",
+) => (hasText(value) ? value!.trim() : fallback);
+
 export const estadoKey = (value?: string | null): StatKey | null => {
   const normalized = normalize(value);
   if (normalized.startsWith("ASIGNAD")) return "ASIGNADA";
@@ -77,7 +105,14 @@ export const estadoKey = (value?: string | null): StatKey | null => {
 
 export const getStatusBadgeMeta = (estado: string | null) => {
   const key = estadoKey(estado);
-  return key ? BADGE_META[key] : null;
+
+  if (!key) return null;
+
+  const meta = STATUS_META[key];
+  return {
+    label: meta.badgeLabel,
+    cls: meta.badgeClass,
+  };
 };
 
 export const buildStats = (rows: Array<Pick<AgendaRow, "estado">>): StatTotals => {

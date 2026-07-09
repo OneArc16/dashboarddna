@@ -29,7 +29,8 @@ export default function StatusMessage({
         TONE_CLASSNAMES[tone],
         className,
       ].join(" ")}
-      role="status"
+      role={tone === "danger" || tone === "warning" ? "alert" : "status"}
+      aria-live="polite"
     >
       <Icon className="mt-0.5 h-4 w-4 shrink-0" />
       <span>{message}</span>
