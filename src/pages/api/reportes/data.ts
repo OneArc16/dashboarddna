@@ -17,6 +17,7 @@ type ReportRow = {
   doc_numero: string | null; // Identificaci_n_usuario (usuarios) o idusuario agenda (fallback)
   idusuario: number | null;
   paciente: string | null;
+  telefono: string | null;
   eps: string | null;
   idmedico: string | null;
   medico: string | null;
@@ -31,6 +32,12 @@ function isCupoLibre(estado?: string | null) {
     .replace(/\p{Diacritic}/gu, "")
     .toUpperCase();
   return v.startsWith("SIN ASIGNAR");
+}
+
+function cleanTelefono(value?: string | null) {
+  const telefono = value?.trim();
+  if (!telefono || /^0+$/.test(telefono)) return null;
+  return telefono;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -94,6 +101,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         Segundo_nombre: string | null;
         Primer_apellido: string | null;
         Segundo_apellido: string | null;
+        Tel_fono: string | null;
         Codigo_eps: string | null;
       }
     >();
@@ -122,6 +130,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             Segundo_nombre: true,
             Primer_apellido: true,
             Segundo_apellido: true,
+            Tel_fono: true,
             Codigo_eps: true,
           },
         });
@@ -153,6 +162,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           fecha_cita: true,
           idhora: true,
           idusuario: true,
+          Telefono: true,
           idmedico: true,
           Estado: true,
           TipoCita: true,
@@ -180,6 +190,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           doc_numero,
           idusuario: u?.IdUsuario ?? null,
           paciente: buildNombre(u) || null,
+          telefono: isCupoLibre(a.Estado)
+            ? null
+            : cleanTelefono(u?.Tel_fono ?? a.Telefono ?? null),
           eps: u?.Codigo_eps ?? null,
           idmedico: a.idmedico ?? null,
           medico: d?.Nombre_empleado ?? null,
@@ -211,6 +224,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           fecha_cita: true,
           idhora: true,
           idusuario: true,
+          Telefono: true,
           idmedico: true,
           Estado: true,
           TipoCita: true,
@@ -252,6 +266,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         doc_numero,
         idusuario: u?.IdUsuario ?? null,
         paciente: buildNombre(u) || null,
+        telefono: isCupoLibre(a.Estado)
+          ? null
+          : cleanTelefono(u?.Tel_fono ?? a.Telefono ?? null),
         eps: u?.Codigo_eps ?? null,
         idmedico: a.idmedico ?? null,
         medico: d?.Nombre_empleado ?? null,

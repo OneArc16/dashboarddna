@@ -1,82 +1,53 @@
-// src/pages/reportes.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { toast } from "react-hot-toast";
 import Head from "next/head";
-import MultiSelectRS from "@/components/MultiSelectRS";
+import { toast } from "react-hot-toast";
+import {
+  CalendarRange,
+  Download,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+} from "lucide-react";
+import PageHeader from "@/components/agenda/PageHeader";
+import StatsOverview from "@/components/agenda/StatsOverview";
+import StatusBadge from "@/components/agenda/StatusBadge";
+import StatusMessage from "@/components/agenda/StatusMessage";
+import TableStateRow from "@/components/agenda/TableStateRow";
 import ModulesMenu from "@/components/ModulesMenu";
-
-/* ============================ Tipos y helpers ============================ */
+import MultiSelectRS from "@/components/MultiSelectRS";
+import {
+  INPUT_CLASS_NAME,
+  buildStats,
+  getErrorMessage,
+  type AgendaRow,
+  type StatKey,
+} from "@/lib/agenda-ui";
 
 type Option = { value: string; label: string };
-
-type Row = {
-  cita_id: number | null;
-  fecha: string;
-  hora: string | null;
-  // NUEVO:
-  doc_tipo: string | null;
-  doc_numero: string | null;
-  // ------
-  idusuario: number | null;
-  paciente: string | null;
-  eps: string | null;
-  idmedico: string | null;
-  medico: string | null;
-  estado: string | null;
-  tipo_cita: string | null;
-};
-
-type StatKey = "ASIGNADA" | "ATENDIDA" | "CUMPLIDA" | "SIN_ASIGNAR";
-
-const STATUS_META: Record<StatKey, { label: string; dot: string }> = {
-  ASIGNADA: { label: "Inasistentes", dot: "bg-amber-500" },
-  ATENDIDA: { label: "Atendidas", dot: "bg-emerald-500" },
-  CUMPLIDA: { label: "Activadas", dot: "bg-indigo-500" },
-  SIN_ASIGNAR: { label: "Cupos libres", dot: "bg-zinc-400" },
-};
-const STATUS_ORDER: StatKey[] = ["ASIGNADA", "ATENDIDA", "CUMPLIDA", "SIN_ASIGNAR"];
-
-const normalize = (s?: string | null) =>
-  (s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
-
-const estadoKey = (s?: string | null): StatKey | null => {
-  const v = normalize(s);
-  if (v.startsWith("ASIGNAD")) return "ASIGNADA";
-  if (v.startsWith("ATENDID")) return "ATENDIDA";
-  if (v.startsWith("CUMPLID")) return "CUMPLIDA";
-  if (v.startsWith("SIN ASIGNAR")) return "SIN_ASIGNAR";
-  return null;
-};
-
-const BADGE_META: Record<StatKey, { label: string; cls: string }> = {
-  ASIGNADA: { label: "Asignada", cls: "bg-amber-100 text-amber-900 border border-amber-200" },
-  ATENDIDA: { label: "Atendido", cls: "bg-emerald-100 text-emerald-900 border border-emerald-200" },
-  CUMPLIDA: { label: "Activada", cls: "bg-indigo-100 text-indigo-900 border border-indigo-200" },
-  SIN_ASIGNAR: { label: "Sin asignar", cls: "bg-zinc-100 text-zinc-800 border border-zinc-200" },
-};
-
-function EstadoBadge({ estado }: { estado: string | null }) {
-  const k = estadoKey(estado);
-  if (!k) return <span>{estado ?? ""}</span>;
-  const meta = BADGE_META[k];
-  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium inline-block ${meta.cls}`}>{meta.label}</span>;
-}
-
-const ALL_LIMIT = 1_000_000;
 type LimitValue = number | "ALL";
 
-/* ============================ Página ============================ */
+const ALL_LIMIT = 1_000_000;
+
+const TABLE_HEADERS = [
+  "ID Cita",
+  "Fecha",
+  "Hora",
+  "Tipo Doc",
+  "N° Documento",
+  "Paciente",
+  "Telefono",
+  "EPS",
+  "Medico",
+  "Estado",
+  "Tipo Cita (CUPS)",
+];
 
 export default function ReportesPage() {
-  const [desde, setDesde] = useState<string>("");
-  const [hasta, setHasta] = useState<string>("");
-  const [eps, setEps] = useState<string>("");
-
-  // legacy (no tocar)
-  const [especialidad, setEspecialidad] = useState<string>("");
-  const [medico, setMedico] = useState<string>("");
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [eps, setEps] = useState("");
 
   const [espSel, setEspSel] = useState<Option[]>([]);
   const [medSel, setMedSel] = useState<Option[]>([]);
@@ -87,56 +58,78 @@ export default function ReportesPage() {
   const [checkCumplida, setCheckCumplida] = useState(true);
   const [checkSinAsignar, setCheckSinAsignar] = useState(true);
 
-  const estadosSeleccionados = useMemo(() => {
-    const arr: StatKey[] = [];
-    if (checkAsignada) arr.push("ASIGNADA");
-    if (checkAtendida) arr.push("ATENDIDA");
-    if (checkCumplida) arr.push("CUMPLIDA");
-    if (checkSinAsignar) arr.push("SIN_ASIGNAR");
-    return arr;
-  }, [checkAsignada, checkAtendida, checkCumplida, checkSinAsignar]);
-
   const [epsOpts, setEpsOpts] = useState<Option[]>([]);
   const [espOpts, setEspOpts] = useState<Option[]>([]);
   const [medOpts, setMedOpts] = useState<Option[]>([]);
 
-  const [rows, setRows] = useState<Row[]>([]);
+  const [rows, setRows] = useState<AgendaRow[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [stats, setStats] = useState<Record<StatKey, number>>({
-    ASIGNADA: 0,
-    ATENDIDA: 0,
-    CUMPLIDA: 0,
-    SIN_ASIGNAR: 0,
-  });
-  const [total, setTotal] = useState(0);
+  const estadosSeleccionados = useMemo(() => {
+    const states: StatKey[] = [];
+    if (checkAsignada) states.push("ASIGNADA");
+    if (checkAtendida) states.push("ATENDIDA");
+    if (checkCumplida) states.push("CUMPLIDA");
+    if (checkSinAsignar) states.push("SIN_ASIGNAR");
+    return states;
+  }, [checkAsignada, checkAtendida, checkCumplida, checkSinAsignar]);
 
-  function recomputeStats(data: Row[]) {
-    const next: Record<StatKey, number> = { ASIGNADA: 0, ATENDIDA: 0, CUMPLIDA: 0, SIN_ASIGNAR: 0 };
-    for (const r of data) {
-      const k = estadoKey(r.estado);
-      if (k) next[k]++;
+  const stats = useMemo(() => buildStats(rows), [rows]);
+  const total = rows.length;
+  const statusFilters = [
+    {
+      key: "ASIGNADA" as const,
+      label: "Asignadas",
+      checked: checkAsignada,
+      onChange: setCheckAsignada,
+    },
+    {
+      key: "ATENDIDA" as const,
+      label: "Atendidas",
+      checked: checkAtendida,
+      onChange: setCheckAtendida,
+    },
+    {
+      key: "CUMPLIDA" as const,
+      label: "Activadas",
+      checked: checkCumplida,
+      onChange: setCheckCumplida,
+    },
+    {
+      key: "SIN_ASIGNAR" as const,
+      label: "Sin asignar",
+      checked: checkSinAsignar,
+      onChange: setCheckSinAsignar,
+    },
+  ];
+
+  const dateRangeMessage = useMemo(() => {
+    if (!desde || !hasta) {
+      return "Selecciona fecha inicial y final para habilitar la busqueda y la exportacion.";
     }
-    setStats(next);
-    setTotal(data.length);
-    return next;
-  }
+    if (desde > hasta) {
+      return "La fecha inicial no puede ser mayor que la fecha final.";
+    }
+    return "";
+  }, [desde, hasta]);
 
-  useEffect(() => {
-    recomputeStats(rows);
-  }, [rows]);
+  const canRunQuery = !loading && !dateRangeMessage;
 
   useEffect(() => {
     (async () => {
       try {
-        const [rEps, rEsp] = await Promise.all([fetch("/api/catalog/eps"), fetch("/api/catalog/especialidades")]);
-        const { options: epsOptions } = await rEps.json();
-        const { options: espOptions } = await rEsp.json();
+        const [epsResponse, espResponse] = await Promise.all([
+          fetch("/api/catalog/eps"),
+          fetch("/api/catalog/especialidades"),
+        ]);
+        const { options: epsOptions } = await epsResponse.json();
+        const { options: espOptions } = await espResponse.json();
+
         setEpsOpts([{ value: "", label: "Todas" }, ...epsOptions]);
         setEspOpts(espOptions);
-      } catch (e) {
-        console.error(e);
-        toast.error("No fue posible cargar catálogos.");
+      } catch (error) {
+        console.error(error);
+        toast.error("No fue posible cargar catalogos.");
       }
     })();
   }, []);
@@ -144,15 +137,19 @@ export default function ReportesPage() {
   useEffect(() => {
     (async () => {
       try {
-        const qs = new URLSearchParams();
-        espSel.forEach((es) => qs.append("especialidades", es.value));
-        const url = "/api/catalog/medicos" + (qs.toString() ? `?${qs.toString()}` : "");
-        const r = await fetch(url);
-        const { options } = await r.json();
+        const query = new URLSearchParams();
+        espSel.forEach((option) => query.append("especialidades", option.value));
+
+        const url = "/api/catalog/medicos" + (query.toString() ? `?${query.toString()}` : "");
+        const response = await fetch(url);
+        const { options } = await response.json();
+
         setMedOpts(options || []);
-        setMedSel((prev) => prev.filter((m) => (options || []).some((o: Option) => o.value === m.value)));
-      } catch (e) {
-        console.error(e);
+        setMedSel((prev) =>
+          prev.filter((item) => (options || []).some((option: Option) => option.value === item.value)),
+        );
+      } catch (error) {
+        console.error(error);
         setMedOpts([]);
         setMedSel([]);
       }
@@ -161,41 +158,44 @@ export default function ReportesPage() {
 
   const handleBuscar = async () => {
     if (!desde || !hasta) return toast.error("Selecciona el rango de fechas.");
-    if (new Date(desde) > new Date(hasta)) return toast.error("La fecha 'Desde' no puede ser mayor a 'Hasta'.");
+    if (desde > hasta) return toast.error("La fecha 'Desde' no puede ser mayor a 'Hasta'.");
 
     setLoading(true);
+
     try {
-      const limitToSend = limit === "ALL" ? ALL_LIMIT : Number(limit);
       const body = {
         desde,
         hasta,
         eps: eps || undefined,
-        especialidades: espSel.map((o) => o.value),
-        medicos: medSel.map((o) => o.value),
+        especialidades: espSel.map((option) => option.value),
+        medicos: medSel.map((option) => option.value),
         estados: estadosSeleccionados,
-        limit: limitToSend,
+        limit: limit === "ALL" ? ALL_LIMIT : Number(limit),
         offset: 0,
       };
 
-      const r = await fetch("/api/reportes/data", {
+      const response = await fetch("/api/reportes/data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j?.error || "No se pudo obtener el reporte.");
-      }
-      const data = (await r.json()) as { rows: Row[] };
-      setRows(data.rows);
-      const localStats = recomputeStats(data.rows);
 
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "No se pudo obtener el reporte.");
+      }
+
+      const data = (await response.json()) as { rows: AgendaRow[] };
+      const nextRows = data.rows;
+      const nextStats = buildStats(nextRows);
+
+      setRows(nextRows);
       toast.success(
-        `Resultados: ${data.rows.length} | Asignadas: ${localStats.ASIGNADA} | Atendidas: ${localStats.ATENDIDA} | Activadas: ${localStats.CUMPLIDA} | Sin asignar: ${localStats.SIN_ASIGNAR}`
+        `Resultados: ${nextRows.length} | Asignadas: ${nextStats.ASIGNADA} | Atendidas: ${nextStats.ATENDIDA} | Activadas: ${nextStats.CUMPLIDA} | Sin asignar: ${nextStats.SIN_ASIGNAR}`,
       );
-    } catch (e: any) {
-      console.error("Buscar error:", e);
-      toast.error(e?.message ?? "Error al buscar.");
+    } catch (error: unknown) {
+      console.error("Buscar error:", error);
+      toast.error(getErrorMessage(error, "Error al buscar."));
     } finally {
       setLoading(false);
     }
@@ -203,20 +203,22 @@ export default function ReportesPage() {
 
   const handleExport = () => {
     if (!desde || !hasta) return toast.error("Selecciona el rango de fechas.");
-    const q = new URLSearchParams();
-    q.set("desde", desde);
-    q.set("hasta", hasta);
-    estadosSeleccionados.forEach((s) => q.append("estados", s));
-    if (eps) q.set("eps", eps);
-    espSel.forEach((o) => q.append("especialidades", o.value));
-    medSel.forEach((o) => q.append("medicos", o.value));
-    window.open(`/api/reportes/export?${q.toString()}`, "_blank");
+
+    const query = new URLSearchParams();
+    query.set("desde", desde);
+    query.set("hasta", hasta);
+    estadosSeleccionados.forEach((state) => query.append("estados", state));
+    if (eps) query.set("eps", eps);
+    espSel.forEach((option) => query.append("especialidades", option.value));
+    medSel.forEach((option) => query.append("medicos", option.value));
+
+    window.open(`/api/reportes/export?${query.toString()}`, "_blank");
   };
 
   const resetFiltros = () => {
+    setDesde("");
+    setHasta("");
     setEps("");
-    setEspecialidad("");
-    setMedico("");
     setEspSel([]);
     setMedSel([]);
     setCheckAsignada(true);
@@ -224,159 +226,333 @@ export default function ReportesPage() {
     setCheckCumplida(true);
     setCheckSinAsignar(true);
     setLimit(1000);
+    setRows([]);
   };
 
   return (
     <>
-      <Head><title>Reportes DNAPLUS</title></Head>
+      <Head>
+        <title>Reportes DNAPLUS</title>
+      </Head>
 
-      <div className="px-4 py-6 mx-auto max-w-[1400px]">
-        <div className="flex items-center justify-between mb-5">
-          <h1 className="text-2xl font-semibold">Reportes DNAPLUS</h1>
-          <div className="flex items-center gap-2">
-            <ModulesMenu />
-            <button onClick={handleExport} className="inline-flex items-center gap-2 px-4 py-2 text-white bg-black rounded-xl hover:opacity-90" title="Descargar Excel">
-              <span>📥</span> Descargar
-            </button>
+      <div className="mx-auto max-w-[1400px] px-4 py-6">
+        <PageHeader
+          title="Reportes"
+          description="Consulta agenda, filtra por especialidad o medico y exporta el resultado actual sin cambiar la logica del reporte."
+          aside={<ModulesMenu />}
+        />
+
+        <section className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Filtros principales
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Empieza por el rango de fechas y luego afina el resultado solo si
+                lo necesitas.
+              </p>
+            </div>
+
+            <StatusMessage
+              icon={CalendarRange}
+              message={dateRangeMessage || "Rango de fechas listo para consultar y exportar."}
+              tone={dateRangeMessage ? "warning" : "success"}
+            />
           </div>
-        </div>
 
-        {/* Filtros */}
-        <div className="p-4 border rounded-2xl">
-          <h2 className="mb-4 font-medium">Filtros</h2>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-12">
             <div className="md:col-span-3">
-              <label className="text-sm text-slate-700">Desde</label>
-              <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg" />
-            </div>
-            <div className="md:col-span-3">
-              <label className="text-sm text-slate-700">Hasta</label>
-              <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg" />
+              <label htmlFor="reporte-desde" className="text-sm font-medium text-slate-700">
+                Desde
+              </label>
+              <input
+                id="reporte-desde"
+                type="date"
+                value={desde}
+                onChange={(event) => setDesde(event.target.value)}
+                className={[
+                  INPUT_CLASS_NAME,
+                  dateRangeMessage && desde && hasta ? "border-amber-300 focus:ring-amber-500/10" : "",
+                ].join(" ")}
+              />
             </div>
 
             <div className="md:col-span-3">
-              <label className="text-sm text-slate-700">EPS</label>
-              <select value={eps} onChange={(e) => setEps(e.target.value)} className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg">
-                {epsOpts.map((o) => (
-                  <option key={o.value || "all"} value={o.value}>{o.label}</option>
+              <label htmlFor="reporte-hasta" className="text-sm font-medium text-slate-700">
+                Hasta
+              </label>
+              <input
+                id="reporte-hasta"
+                type="date"
+                value={hasta}
+                onChange={(event) => setHasta(event.target.value)}
+                className={[
+                  INPUT_CLASS_NAME,
+                  dateRangeMessage && desde && hasta ? "border-amber-300 focus:ring-amber-500/10" : "",
+                ].join(" ")}
+              />
+            </div>
+
+            <div className="md:col-span-3">
+              <label htmlFor="reporte-eps" className="text-sm font-medium text-slate-700">
+                EPS
+              </label>
+              <select
+                id="reporte-eps"
+                value={eps}
+                onChange={(event) => setEps(event.target.value)}
+                className={INPUT_CLASS_NAME}
+              >
+                {epsOpts.map((option) => (
+                  <option key={option.value || "all"} value={option.value}>
+                    {option.label}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div className="md:col-span-3">
-              <label className="text-sm text-slate-700">Registros por página</label>
+              <label htmlFor="reporte-limit" className="text-sm font-medium text-slate-700">
+                Registros por consulta
+              </label>
               <select
+                id="reporte-limit"
                 value={limit === "ALL" ? "ALL" : String(limit)}
-                onChange={(e) => setLimit(e.target.value === "ALL" ? "ALL" : Number(e.target.value))}
-                className="w-full h-[42px] px-3 py-2 mt-1 border rounded-lg"
+                onChange={(event) =>
+                  setLimit(event.target.value === "ALL" ? "ALL" : Number(event.target.value))
+                }
+                className={INPUT_CLASS_NAME}
               >
-                {[100, 500, 1000, 5000].map((n) => <option key={n} value={n}>{n}</option>)}
+                {[100, 500, 1000, 5000].map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
                 <option value="ALL">Todos</option>
               </select>
             </div>
-
-            <div className="md:col-span-6">
-              <MultiSelectRS label="Especialidad" options={espOpts} value={espSel} onChange={setEspSel} />
-              <div className="flex items-center gap-3 mt-1 text-xs text-slate-600">
-                <button type="button" onClick={() => setEspSel([])} className="px-2 py-1 border rounded">Limpiar selección ({espSel.length})</button>
-                <span>{espSel.length} seleccionada(s)</span>
-              </div>
-            </div>
-
-            <div className="md:col-span-6">
-              <MultiSelectRS label="Médico" options={medOpts} value={medSel} onChange={setMedSel} />
-              <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-slate-600">
-                <button type="button" onClick={() => setMedSel([])} className="px-2 py-1 border rounded">Limpiar selección ({medSel.length})</button>
-                <span>{medSel.length} seleccionado(s)</span>
-                <span className="text-slate-500">Mostrando {medOpts.length} médico(s) para {espSel.length || "todas"} especialidad(es).</span>
-              </div>
-            </div>
-
-            <div className="md:col-span-12">
-              <div className="grid grid-cols-2 gap-2 mt-1 md:grid-cols-4">
-                <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={checkAsignada} onChange={(e) => setCheckAsignada(e.target.checked)} /> Asignadas</label>
-                <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={checkAtendida} onChange={(e) => setCheckAtendida(e.target.checked)} /> Atendidas</label>
-                <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={checkCumplida} onChange={(e) => setCheckCumplida(e.target.checked)} /> Activadas</label>
-                <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={checkSinAsignar} onChange={(e) => setCheckSinAsignar(e.target.checked)} /> Sin asignar</label>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 mt-2 md:col-span-12">
-              <button onClick={handleBuscar} disabled={loading} className="px-4 py-2 text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-60">
-                {loading ? "Buscando..." : "Buscar"}
-              </button>
-              <button onClick={resetFiltros} className="px-4 py-2 border rounded-xl text-slate-700 hover:bg-slate-50">Limpiar filtros</button>
-            </div>
-          </div>
-        </div>
-
-        {/* Resultados */}
-        <div className="p-4 mt-6 border rounded-2xl">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-medium">Resultados ({total})</h3>
-            <div className="text-sm text-slate-500">Mostrando {rows.length} registro(s)</div>
           </div>
 
-          <div className="flex flex-wrap gap-2 mt-1 mb-3 text-sm">
-            {STATUS_ORDER.map((k) => {
-              const pct = total ? ((stats[k] / total) * 100).toFixed(1) : "0.0";
-              return (
-                <div key={k} className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5">
-                  <span className={`inline-block size-2 rounded-full ${STATUS_META[k].dot}`} />
-                  <span className="font-medium">{STATUS_META[k].label}:</span>
-                  <span className="tabular-nums">{stats[k]}</span>
-                  <span className="text-zinc-500">({pct}%)</span>
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Filtros detallados
+                </h3>
+                <p className="text-sm text-slate-600">
+                  Especialidad, medico y estados ayudan a reducir el volumen sin
+                  recargar la pantalla principal.
+                </p>
+              </div>
+
+              <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                Opcionales
+              </span>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-12">
+              <div className="md:col-span-6">
+                <MultiSelectRS
+                  label="Especialidad"
+                  placeholder="Filtra por especialidad..."
+                  options={espOpts}
+                  value={espSel}
+                  onChange={setEspSel}
+                  summaryLabel="especialidades"
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium">
+                    {espSel.length} seleccionada(s)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setEspSel([])}
+                    disabled={espSel.length === 0}
+                    className="rounded-full border border-slate-300 px-2.5 py-1 font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Limpiar
+                  </button>
                 </div>
-              );
-            })}
+              </div>
+
+              <div className="md:col-span-6">
+                <MultiSelectRS
+                  label="Medico"
+                  placeholder="Filtra por medico..."
+                  options={medOpts}
+                  value={medSel}
+                  onChange={setMedSel}
+                  summaryLabel="medicos"
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium">
+                    {medSel.length} seleccionado(s)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setMedSel([])}
+                    disabled={medSel.length === 0}
+                    className="rounded-full border border-slate-300 px-2.5 py-1 font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Limpiar
+                  </button>
+                  <span className="text-slate-500">
+                    {medOpts.length} medico(s) disponibles con la seleccion actual.
+                  </span>
+                </div>
+              </div>
+
+              <fieldset className="md:col-span-12">
+                <legend className="text-sm font-medium text-slate-700">
+                  Estados incluidos
+                </legend>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  {statusFilters.map((option) => {
+                    return (
+                      <label
+                        key={option.key}
+                        className="flex min-h-11 items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={option.checked}
+                          onChange={(event) => option.onChange(event.target.checked)}
+                          className="h-4 w-4 rounded border-slate-400 text-cyan-700 focus:ring-cyan-600"
+                        />
+                        <span className="font-medium">{option.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <button
+              onClick={handleBuscar}
+              disabled={!canRunQuery}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              <Search className="h-4 w-4" />
+              {loading ? "Buscando..." : "Buscar"}
+            </button>
+
+            <button
+              type="button"
+              onClick={resetFiltros}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Restablecer filtros
+            </button>
+
+            <p className="text-sm text-slate-500">
+              La exportacion utiliza exactamente los filtros visibles.
+            </p>
+          </div>
+        </section>
+
+        <section
+          className="mt-6 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm"
+          aria-busy={loading}
+        >
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Resultados</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {rows.length > 0
+                  ? `Mostrando ${rows.length} registro(s) para los filtros actuales.`
+                  : canRunQuery
+                    ? "Ejecuta la consulta para cargar resultados o exportar a Excel."
+                    : "Completa un rango valido para empezar."}
+              </p>
+            </div>
+
+            <button
+              onClick={handleExport}
+              disabled={!canRunQuery}
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              title="Exportar el reporte actual a Excel"
+            >
+              <Download className="h-4 w-4" />
+              Exportar Excel
+            </button>
+          </div>
+
+          <StatsOverview stats={stats} total={total} />
+
+          <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200">
             <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left border-b bg-slate-50">
-                  {[
-                    "ID Cita",
-                    "Fecha",
-                    "Hora",
-                    "Tipo Doc",       // NUEVO
-                    "N° Documento",   // NUEVO
-                    "Paciente",
-                    "EPS",
-                    "ID Médico",
-                    "Médico",
-                    "Estado",
-                    "Tipo Cita (CUPS)",
-                  ].map((h) => (
-                    <th key={h} className="px-3 py-2 font-semibold whitespace-nowrap">{h}</th>
+              <caption className="sr-only">Resultados del reporte de citas</caption>
+              <thead className="bg-slate-50">
+                <tr className="text-left">
+                  {TABLE_HEADERS.map((header) => (
+                    <th
+                      key={header}
+                      className="sticky top-0 z-10 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-3 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600"
+                    >
+                      {header}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 && (
-                  <tr>
-                    <td className="px-3 py-6 text-center text-slate-500 whitespace-nowrap" colSpan={11}>Sin resultados</td>
-                  </tr>
+                {rows.length === 0 ? (
+                  <TableStateRow
+                    colSpan={TABLE_HEADERS.length}
+                    loading={loading}
+                    emptyTitle="Aun no hay resultados visibles."
+                    emptyDescription="Usa un rango valido y pulsa Buscar."
+                  />
+                ) : (
+                  rows.map((row, index) => (
+                    <tr
+                      key={`${row.cita_id ?? index}-${index}`}
+                      className="border-b border-slate-200 bg-white even:bg-slate-50/50 hover:bg-cyan-50/50"
+                    >
+                      <td className="whitespace-nowrap px-3 py-3 tabular-nums text-slate-700">
+                        {row.cita_id ?? ""}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-slate-700">{row.fecha}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-slate-700">{row.hora ?? ""}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-slate-700">{row.doc_tipo ?? ""}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-slate-700">{row.doc_numero ?? ""}</td>
+                      <td className="px-3 py-3 text-slate-700">
+                        <div className="max-w-[220px] truncate" title={row.paciente ?? ""}>
+                          {row.paciente ?? ""}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-slate-700">
+                        {row.telefono ?? ""}
+                      </td>
+                      <td className="px-3 py-3 text-slate-700">
+                        <div className="max-w-[180px] truncate" title={row.eps ?? ""}>
+                          {row.eps ?? ""}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-slate-700">
+                        <div className="max-w-[220px] truncate" title={row.medico ?? ""}>
+                          {row.medico ?? ""}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3">
+                        <StatusBadge estado={row.estado} />
+                      </td>
+                      <td className="px-3 py-3 text-slate-700">
+                        <div className="max-w-[240px] truncate" title={row.tipo_cita ?? ""}>
+                          {row.tipo_cita ?? ""}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
                 )}
-                {rows.map((r, i) => (
-                  <tr key={`${r.cita_id ?? i}-${i}`} className="border-b">
-                    <td className="px-3 py-2 tabular-nums whitespace-nowrap">{r.cita_id ?? ""}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.fecha}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.hora ?? ""}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.doc_tipo ?? ""}</td>     {/* NUEVO */}
-                    <td className="px-3 py-2 whitespace-nowrap">{r.doc_numero ?? ""}</td>   {/* NUEVO */}
-                    <td className="px-3 py-2 whitespace-nowrap">{r.paciente ?? ""}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.eps ?? ""}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.idmedico ?? ""}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.medico ?? ""}</td>
-                    <td className="px-3 py-2 whitespace-nowrap"><EstadoBadge estado={r.estado} /></td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.tipo_cita ?? ""}</td>
-                  </tr>
-                ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       </div>
     </>
   );

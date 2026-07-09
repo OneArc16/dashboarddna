@@ -1,9 +1,9 @@
 // src/components/ModulesMenu.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { LayoutGrid, Search, Trash2, BarChart3 } from "lucide-react";
+import { useRouter } from "next/router";
+import { Trash2, BarChart3 } from "lucide-react";
 
 type ModuleItem = {
   href: string;
@@ -18,95 +18,55 @@ const DEFAULT_ITEMS: ModuleItem[] = [
 ];
 
 export default function ModulesMenu({ items = DEFAULT_ITEMS }: { items?: ModuleItem[] }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  // cerrar con click afuera / ESC
-  useEffect(() => {
-    function onDown(e: MouseEvent) {
-      if (!ref.current) return;
-      if (!ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, []);
-
-  const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    if (!t) return items;
-    return items.filter((i) => i.label.toLowerCase().includes(t));
-  }, [q, items]);
+  const router = useRouter();
 
   return (
-    <div className="relative" ref={ref}>
-      {/* Botón launcher */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="inline-flex items-center gap-2 px-3 py-2 transition bg-white border shadow-sm group rounded-2xl hover:bg-slate-50 border-slate-200 text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-        title="Módulos"
-      >
-        <LayoutGrid className="w-5 h-5 transition group-hover:scale-110" />
-        <span className="hidden sm:block">Módulos</span>
-      </button>
+    <nav aria-label="Módulos principales" className="overflow-x-auto">
+      <div className="inline-flex min-w-full gap-2 rounded-2xl border border-slate-200 bg-white/95 p-1 shadow-sm">
+        {items.map((item) => {
+          const active = router.pathname === item.href;
 
-      {/* Panel */}
-      <div
-        className={`absolute right-0 z-50 mt-2 w-[320px] sm:w-[380px] origin-top-right
-                    rounded-2xl border border-slate-200 bg-white shadow-xl
-                    transition-all ${open ? "scale-100 opacity-100" : "pointer-events-none scale-95 opacity-0"}`}
-        role="menu"
-        aria-label="Selector de módulos"
-      >
-        {/* Barra de búsqueda */}
-        <div className="p-3 border-b border-slate-200">
-          <div className="relative">
-            <Search className="absolute w-4 h-4 -translate-y-1/2 left-3 top-1/2 text-slate-400" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar módulo…"
-              className="w-full py-2 pr-3 text-sm border outline-none rounded-xl border-slate-200 pl-9 focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-
-        {/* Grid de módulos */}
-        <div className="grid grid-cols-2 gap-2 p-3">
-          {filtered.map((m) => (
+          return (
             <Link
-              key={m.href + m.label}
-              href={m.href}
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-3 px-3 py-3 transition border border-transparent rounded-xl hover:bg-slate-50 hover:border-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              key={item.href}
+              href={item.href}
+              aria-current={active ? "page" : undefined}
+              className={[
+                "flex min-h-11 flex-1 items-center gap-3 rounded-xl px-4 py-3 text-left text-sm transition",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/30",
+                active
+                  ? "bg-cyan-600 text-white shadow-sm"
+                  : "text-slate-700 hover:bg-slate-50 hover:text-slate-900",
+              ].join(" ")}
             >
-              <span className="grid bg-white border place-items-center rounded-xl border-slate-200 w-9 h-9 text-rose-600">
-                {m.icon}
+              <span
+                className={[
+                  "grid h-9 w-9 shrink-0 place-items-center rounded-xl border transition",
+                  active
+                    ? "border-white/20 bg-white/10 text-white"
+                    : "border-slate-200 bg-slate-50 text-cyan-700",
+                ].join(" ")}
+              >
+                {item.icon}
               </span>
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate text-slate-800">{m.label}</p>
-                {m.desc && <p className="text-xs truncate text-slate-500">{m.desc}</p>}
-              </div>
-            </Link>
-          ))}
 
-          {filtered.length === 0 && (
-            <div className="col-span-2 p-6 text-sm text-center text-slate-500">
-              Sin coincidencias
-            </div>
-          )}
-        </div>
+              <span className="min-w-0">
+                <span className="block font-medium">{item.label}</span>
+                {item.desc && (
+                  <span
+                    className={[
+                      "block truncate text-xs",
+                      active ? "text-cyan-50/90" : "text-slate-500",
+                    ].join(" ")}
+                  >
+                    {item.desc}
+                  </span>
+                )}
+              </span>
+            </Link>
+          );
+        })}
       </div>
-    </div>
+    </nav>
   );
 }

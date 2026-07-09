@@ -58,8 +58,15 @@ type PacienteInfo = {
   nombre: string | null;
   doc_tipo: string | null;
   doc_numero: string | null;
+  telefono: string | null;
   eps: string | null;
 };
+
+function cleanTelefono(value?: string | null) {
+  const telefono = value?.trim();
+  if (!telefono || /^0+$/.test(telefono)) return null;
+  return telefono;
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
@@ -133,6 +140,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         fecha_cita: true,
         idhora: true,
         idusuario: true, // VARCHAR(18)
+        Telefono: true,
         idmedico: true,
         Estado: true,
         TipoCita: true,
@@ -152,14 +160,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     let usuarios: Array<{
       IdUsuario: number;
-      Identificaci_n_usuario: string;
-      Tipo_identificaci_n: string;
-      Codigo_eps: string;
-      Primer_nombre: string | null;
-      Segundo_nombre: string | null;
-      Primer_apellido: string | null;
-      Segundo_apellido: string | null;
-    }> = [];
+    Identificaci_n_usuario: string;
+    Tipo_identificaci_n: string;
+    Codigo_eps: string;
+    Primer_nombre: string | null;
+    Segundo_nombre: string | null;
+    Primer_apellido: string | null;
+    Segundo_apellido: string | null;
+    Tel_fono: string | null;
+  }> = [];
 
     if (rawUserKeys.length) {
       usuarios = await prisma.usuarios.findMany({
@@ -180,6 +189,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           Segundo_nombre: true,
           Primer_apellido: true,
           Segundo_apellido: true,
+          Tel_fono: true,
         },
       });
     }
@@ -192,6 +202,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         nombre: buildNombre(u),
         doc_tipo: u.Tipo_identificaci_n ?? null,
         doc_numero: u.Identificaci_n_usuario ?? null,
+        telefono: cleanTelefono(u.Tel_fono ?? null),
         eps: u.Codigo_eps ?? null,
       };
 
@@ -241,6 +252,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         paciente: info?.nombre ?? null,
         doc_tipo: info?.doc_tipo ?? null,
         doc_numero: info?.doc_numero ?? null,
+        telefono: cleanTelefono(info?.telefono ?? a.Telefono ?? null),
         // EPS primero la del paciente, si no, la de la agenda
         eps: info?.eps ?? a.Entidad ?? null,
         // resto de campos
