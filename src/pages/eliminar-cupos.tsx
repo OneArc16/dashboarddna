@@ -399,6 +399,12 @@ export default function EliminarCuposPage() {
     rows.length,
   ]);
 
+  const shouldShowResultsStatus =
+    loading ||
+    deleting ||
+    resultsStatus.tone === "danger" ||
+    (resultsStatus.tone === "info" && querySync.hasQueryState && hasActiveFilters && !hasSearched);
+
   useEffect(() => {
     (async () => {
       try {
@@ -511,12 +517,14 @@ export default function EliminarCuposPage() {
       const nextCuposLibres = nextRows.filter(
         (row) => estadoKey(row.estado) === "SIN_ASIGNAR" && row.cita_id != null,
       ).length;
+      const successMessage =
+        nextRows.length > 0
+          ? `Consulta lista. ${nextRows.length} registro(s) cargados y ${nextCuposLibres} cupo(s) libre(s) disponibles para eliminar.`
+          : "Consulta lista. No se encontraron cupos para los filtros actuales.";
 
       setRows(nextRows);
-      setResultsNotice({
-        tone: "success",
-        message: `Consulta lista. ${nextRows.length} registro(s) cargados y ${nextCuposLibres} cupo(s) libre(s) disponibles para eliminar.`,
-      });
+      setResultsNotice(createDefaultResultsNotice());
+      toast.success(successMessage);
     } catch (error: unknown) {
       console.error("Buscar error:", error);
       const message = getErrorMessage(error, "Error al buscar.");
@@ -587,10 +595,8 @@ export default function EliminarCuposPage() {
 
       setRows(nextRows);
       setSelectedIds([]);
-      setResultsNotice({
-        tone: "success",
-        message: `Eliminacion completada. Se quitaron ${deleted} cupo(s) del resultado actual.`,
-      });
+      setResultsNotice(createDefaultResultsNotice());
+      toast.success(`Eliminacion completada. Se quitaron ${deleted} cupo(s) del resultado actual.`);
     } catch (error: unknown) {
       console.error(error);
       const message = getErrorMessage(error, "Error al eliminar.");
@@ -879,12 +885,14 @@ export default function EliminarCuposPage() {
             </div>
           </div>
 
-          <StatusMessage
-            icon={loading || deleting ? Search : CalendarRange}
-            message={resultsStatus.message}
-            tone={resultsStatus.tone}
-            className="mt-4"
-          />
+          {shouldShowResultsStatus ? (
+            <StatusMessage
+              icon={loading || deleting ? Search : CalendarRange}
+              message={resultsStatus.message}
+              tone={resultsStatus.tone}
+              className="mt-4"
+            />
+          ) : null}
 
           <StatsOverview stats={stats} total={total} />
 

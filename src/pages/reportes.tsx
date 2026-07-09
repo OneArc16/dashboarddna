@@ -246,6 +246,12 @@ export default function ReportesPage() {
     rows.length,
   ]);
 
+  const shouldShowResultsStatus =
+    loading ||
+    exporting ||
+    resultsStatus.tone === "danger" ||
+    (resultsStatus.tone === "info" && querySync.hasQueryState && hasActiveFilters && !hasSearched);
+
   useEffect(() => {
     (async () => {
       try {
@@ -338,12 +344,14 @@ export default function ReportesPage() {
       const data = (await response.json()) as { rows: AgendaRow[] };
       const nextRows = data.rows ?? [];
       const nextStats = buildStats(nextRows);
+      const successMessage =
+        nextRows.length > 0
+          ? `Consulta lista. ${nextRows.length} registro(s) cargados: ${nextStats.ASIGNADA} asignadas, ${nextStats.ATENDIDA} atendidas, ${nextStats.CUMPLIDA} activadas y ${nextStats.SIN_ASIGNAR} sin asignar.`
+          : "Consulta lista. No se encontraron registros para los filtros actuales.";
 
       setRows(nextRows);
-      setResultsNotice({
-        tone: "success",
-        message: `Consulta lista. ${nextRows.length} registro(s) cargados: ${nextStats.ASIGNADA} asignadas, ${nextStats.ATENDIDA} atendidas, ${nextStats.CUMPLIDA} activadas y ${nextStats.SIN_ASIGNAR} sin asignar.`,
-      });
+      setResultsNotice(createDefaultResultsNotice());
+      toast.success(successMessage);
     } catch (error: unknown) {
       console.error("Buscar error:", error);
       const message = getErrorMessage(error, "Error al buscar.");
@@ -372,10 +380,7 @@ export default function ReportesPage() {
       getOptionValues(medSel).forEach((value) => query.append("medicos", value));
 
       window.open(`/api/reportes/export?${query.toString()}`, "_blank");
-      setResultsNotice({
-        tone: "info",
-        message: "La exportacion se abrio con los filtros visibles actualmente.",
-      });
+      toast.success("La exportacion se abrio con los filtros visibles actualmente.");
     } catch (error) {
       console.error(error);
       toast.error("No fue posible preparar la exportacion.");
@@ -674,12 +679,14 @@ export default function ReportesPage() {
             </button>
           </div>
 
-          <StatusMessage
-            icon={loading || exporting ? Search : CalendarRange}
-            message={resultsStatus.message}
-            tone={resultsStatus.tone}
-            className="mt-4"
-          />
+          {shouldShowResultsStatus ? (
+            <StatusMessage
+              icon={loading || exporting ? Search : CalendarRange}
+              message={resultsStatus.message}
+              tone={resultsStatus.tone}
+              className="mt-4"
+            />
+          ) : null}
 
           <StatsOverview stats={stats} total={total} />
 
