@@ -417,7 +417,6 @@ export default function ReportesPage() {
       <div className="mx-auto max-w-[1400px] px-4 py-6">
         <PageHeader
           title="Reportes"
-          description="Consulta agenda, filtra por especialidad o medico y exporta el resultado actual sin cambiar la logica del reporte."
           aside={<ModulesMenu />}
         />
 
@@ -425,9 +424,6 @@ export default function ReportesPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Filtros principales</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Empieza por el rango de fechas y afina solo lo necesario para reducir ruido.
-              </p>
             </div>
 
             <StatusMessage
@@ -524,10 +520,6 @@ export default function ReportesPage() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-slate-900">Filtros detallados</h3>
-                <p className="text-sm text-slate-600">
-                  Especialidad, medico y estados ayudan a reducir volumen sin recargar la pantalla
-                  principal.
-                </p>
               </div>
 
               <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600">
@@ -593,11 +585,11 @@ export default function ReportesPage() {
                   >
                     Limpiar
                   </button>
-                  <span className="text-slate-500">
-                    {espSel.length > 0
-                      ? "La lista se ajusta automaticamente a la especialidad seleccionada."
-                      : "La lista muestra todos los medicos disponibles."}
-                  </span>
+                  {espSel.length > 0 ? (
+                    <span className="text-slate-500">
+                      La lista se ajusta automaticamente a la especialidad seleccionada.
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
@@ -645,11 +637,6 @@ export default function ReportesPage() {
               <RotateCcw className="h-4 w-4" />
               Restablecer filtros
             </button>
-
-            <p className="text-sm text-slate-500">
-              Los filtros se conservan en la URL para que puedas recargar, compartir o retomar la
-              consulta sin reconfigurarla.
-            </p>
           </div>
         </section>
 
@@ -660,11 +647,11 @@ export default function ReportesPage() {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Resultados</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                {rows.length > 0
-                  ? `Mostrando ${rows.length} registro(s) para los filtros actuales.`
-                  : "La tabla y las tarjetas muestran el mismo resultado segun el ancho de pantalla."}
-              </p>
+              {rows.length > 0 ? (
+                <p className="mt-1 text-sm text-slate-600">
+                  Mostrando {rows.length} registro(s) para los filtros actuales.
+                </p>
+              ) : null}
             </div>
 
             <button

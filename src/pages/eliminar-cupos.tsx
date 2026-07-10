@@ -639,7 +639,6 @@ export default function EliminarCuposPage() {
       <div className="mx-auto max-w-[1400px] px-4 py-6">
         <PageHeader
           title="Eliminar cupos"
-          description="Busca cupos por rango, revisa el estado y elimina solo los registros que esten sin asignar."
           aside={<ModulesMenu />}
         />
 
@@ -647,10 +646,6 @@ export default function EliminarCuposPage() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Filtros de busqueda</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Define primero el rango y luego afina por EPS, especialidad o medico si hace
-                falta.
-              </p>
             </div>
 
             <StatusMessage
@@ -858,11 +853,6 @@ export default function EliminarCuposPage() {
               <RotateCcw className="h-4 w-4" />
               Restablecer filtros
             </button>
-
-            <p className="text-sm text-slate-500">
-              Los filtros se conservan en la URL y la seleccion se limpia cuando ejecutas una nueva
-              busqueda.
-            </p>
           </div>
         </section>
 
@@ -873,11 +863,12 @@ export default function EliminarCuposPage() {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Resultados y seleccion</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                {rows.length > 0
-                  ? `Mostrando ${rows.length} registro(s). Selecciona solo los cupos libres que quieras eliminar.`
-                  : "La tabla y las tarjetas muestran el mismo resultado segun el ancho de pantalla."}
-              </p>
+              {rows.length > 0 ? (
+                <p className="mt-1 text-sm text-slate-600">
+                  Mostrando {rows.length} registro(s). Selecciona solo los cupos libres que
+                  quieras eliminar.
+                </p>
+              ) : null}
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-sm text-slate-600">

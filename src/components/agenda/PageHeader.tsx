@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 type PageHeaderProps = {
   title: string;
-  description: string;
+  description?: string;
   aside?: ReactNode;
   eyebrow?: string;
 };
@@ -23,9 +23,11 @@ export default function PageHeader({
           <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
             {title}
           </h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-600 sm:text-base">
-            {description}
-          </p>
+          {description ? (
+            <p className="mt-2 max-w-3xl text-sm text-slate-600 sm:text-base">
+              {description}
+            </p>
+          ) : null}
         </div>
       </div>
 
